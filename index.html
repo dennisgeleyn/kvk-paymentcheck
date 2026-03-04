@@ -647,32 +647,78 @@
 </div>
 
 <script>
-  // ══════════════════════════════════════════════════════════════════════════
-  // CRYPTO + AUTH
-  // Uses Web Crypto API (AES-256-GCM) to encrypt credentials with the user's
-  // password. The password is never stored; only the ciphertext lives in
-  // localStorage. Plain-text credentials exist only in memory during a session.
-  // ══════════════════════════════════════════════════════════════════════════
+  // ==========================================================================
+  // CONSTANTS & CONFIG
+  // ==========================================================================
 
-  const LS_KEY = 'stamhoofd_enc_creds_v1';
+  const LS_KEY       = 'stamhoofd_enc_creds_v1';
   const AUTO_LOCK_MS = 30 * 60 * 1000; // 30 minutes
+  const MAX_FILE_SIZE = 5_000_000;      // 5 MB
+  const UUID_RE      = /^[0-9a-f-]{36}$/i;
 
-  // In-memory session credentials (never persisted in plain text)
-  let sessionOrgId = '';
+  // ==========================================================================
+  // STATE
+  // ==========================================================================
+
+  // Auth state — credentials live only in memory, never persisted plain-text
+  let sessionOrgId  = '';
   let sessionApiKey = '';
-  let lockTimer = null;
-  let lockCountdownInterval = null;
-  let lockAt = null;
+  let loginFailCount    = 0;
+  let loginLockedUntil  = 0;
+  let autoLockTimer     = null;
+  let autoLockInterval  = null;
+  let autoLockAt        = null;
 
-  // ── Crypto helpers ─────────────────────────────────────────────────────────
+  // App state
+  let csvRows      = [];
+  let openPayments = [];
+  let matches      = [];
+  let confirmInProgress = false;
+
+  // ==========================================================================
+  // DOM REFS
+  // ==========================================================================
+
+  const $ = id => document.getElementById(id);
+
+  // Auth overlay
+  const authOverlay          = $('authOverlay');
+  const authError            = $('authError');
+  const viewLogin            = $('viewLogin');
+  const viewSetup            = $('viewSetup');
+  const viewChange           = $('viewChange');
+  const btnLogin             = $('btnLogin');
+  const btnSetup             = $('btnSetup');
+  const btnLock              = $('btnLock');
+  const btnChangeCreds       = $('btnChangeCreds');
+  const linkReset            = $('linkReset');
+  const linkChangeWhileLocked = $('linkChangeWhileLocked');
+
+  // App
+  const orgIdEl    = $('orgId');
+  const apiKeyEl   = $('apiKey');
+  const fileInput  = $('fileInput');
+  const dropZone   = $('dropZone');
+  const dropLabel  = $('dropLabel');
+  const btnFetch   = $('btnFetch');
+  const btnConfirm = $('btnConfirm');
+  const btnReset   = $('btnReset');
+  const btnStartOver = $('btnStartOver');
+
+  // ==========================================================================
+  // CRYPTO
+  // ==========================================================================
 
   async function deriveKey(password, salt) {
-    const enc = new TextEncoder();
     const keyMaterial = await crypto.subtle.importKey(
-      'raw', enc.encode(password), { name: 'PBKDF2' }, false, ['deriveKey']
+      'raw',
+      new TextEncoder().encode(password),
+      { name: 'PBKDF2' },
+      false,
+      ['deriveKey']
     );
     return crypto.subtle.deriveKey(
-      { name: 'PBKDF2', salt, iterations: 310000, hash: 'SHA-256' },
+      { name: 'PBKDF2', salt, iterations: 310_000, hash: 'SHA-256' },
       keyMaterial,
       { name: 'AES-GCM', length: 256 },
       false,
@@ -681,15 +727,18 @@
   }
 
   async function encryptCredentials(orgId, apiKey, password) {
-    const salt = crypto.getRandomValues(new Uint8Array(16));
-    const iv   = crypto.getRandomValues(new Uint8Array(12));
-    const key  = await deriveKey(password, salt);
-    const plain = new TextEncoder().encode(JSON.stringify({ orgId, apiKey }));
+    const salt   = crypto.getRandomValues(new Uint8Array(16));
+    const iv     = crypto.getRandomValues(new Uint8Array(12));
+    const key    = await deriveKey(password, salt);
+    const plain  = new TextEncoder().encode(JSON.stringify({ orgId, apiKey }));
     const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, plain);
-    // Pack: salt(16) + iv(12) + ciphertext → base64
-    const buf = new Uint8Array(16 + 12 + cipher.byteLength);
-    buf.set(salt, 0); buf.set(iv, 16); buf.set(new Uint8Array(cipher), 28);
-    return btoa(String.fromCharCode(...buf));
+
+    // Layout: salt(16) | iv(12) | ciphertext → base64
+    const packed = new Uint8Array(16 + 12 + cipher.byteLength);
+    packed.set(salt, 0);
+    packed.set(iv, 16);
+    packed.set(new Uint8Array(cipher), 28);
+    return btoa(String.fromCharCode(...packed));
   }
 
   async function decryptCredentials(b64, password) {
@@ -702,130 +751,138 @@
     return JSON.parse(new TextDecoder().decode(plain));
   }
 
-  // ── Auth UI logic ──────────────────────────────────────────────────────────
+  // ==========================================================================
+  // AUTO-LOCK
+  // ==========================================================================
 
-  const authOverlay   = document.getElementById('authOverlay');
-  const viewLogin     = document.getElementById('viewLogin');
-  const viewSetup     = document.getElementById('viewSetup');
-  const viewChange    = document.getElementById('viewChange');
-  const authError     = document.getElementById('authError');
-  const btnLogin      = document.getElementById('btnLogin');
-  const btnSetup      = document.getElementById('btnSetup');
-  const btnLock       = document.getElementById('btnLock');
-  const btnChangeCreds= document.getElementById('btnChangeCreds');
-  const linkReset     = document.getElementById('linkReset');
-  const linkChangeWhileLocked = document.getElementById('linkChangeWhileLocked');
-
-  function showAuthError(msg) {
-    authError.textContent = msg;
-    authError.style.display = 'block';
+  function startAutoLock() {
+    stopAutoLock();
+    autoLockAt = Date.now() + AUTO_LOCK_MS;
+    autoLockTimer    = setTimeout(lock, AUTO_LOCK_MS);
+    autoLockInterval = setInterval(updateLockCountdown, 30_000);
+    updateLockCountdown();
   }
 
-  function clearAuthError() {
-    authError.style.display = 'none';
-    authError.textContent = '';
+  function stopAutoLock() {
+    clearTimeout(autoLockTimer);
+    clearInterval(autoLockInterval);
+    autoLockTimer = autoLockInterval = null;
+    autoLockAt = null;
+    $('lockTimer').textContent = '';
   }
 
-  function showView(name) {
+  function resetAutoLock() {
+    if (autoLockAt !== null) startAutoLock();
+  }
+
+  function updateLockCountdown() {
+    if (!autoLockAt) return;
+    const mins = Math.max(0, Math.ceil((autoLockAt - Date.now()) / 60_000));
+    $('lockTimer').textContent = `Auto-lock over ${mins} min`;
+  }
+
+  // Only reset the inactivity timer when a session is active
+  document.addEventListener('click',   () => { if (sessionApiKey) resetAutoLock(); });
+  document.addEventListener('keydown', () => { if (sessionApiKey) resetAutoLock(); });
+
+  // Lock immediately when the tab is hidden
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden' && sessionApiKey) lock();
+  });
+
+  // ==========================================================================
+  // AUTH — SESSION MANAGEMENT
+  // ==========================================================================
+
+  function startSession(orgId, apiKey) {
+    sessionOrgId  = orgId;
+    sessionApiKey = apiKey;
+    orgIdEl.value  = orgId;
+    apiKeyEl.value = apiKey;
+    authOverlay.style.display = 'none';
+    startAutoLock();
+    updateFetchButton();
+  }
+
+  function lock() {
+    sessionOrgId = sessionApiKey = '';
+    orgIdEl.value = apiKeyEl.value = '';
+    stopAutoLock();
+    confirmInProgress = false;
+    showAuthOverlay('login');
+  }
+
+  // ==========================================================================
+  // AUTH — OVERLAY NAVIGATION
+  // ==========================================================================
+
+  function showAuthOverlay(view) {
+    clearAuthError();
+    authOverlay.style.display = 'flex';
+    const hasStored = !!localStorage.getItem(LS_KEY);
+
+    if (view === 'change' && hasStored) {
+      showAuthView('change');
+      // Only pre-fill org ID when actively logged in
+      $('changeOrgId').value    = sessionApiKey ? sessionOrgId : '';
+      $('changeApiKey').value   = '';
+      $('changeCurrentPw').value = '';
+      $('changeNewPw').value    = '';
+      $('changeNewPw2').value   = '';
+      setTimeout(() => $('changeCurrentPw').focus(), 50);
+    } else if (hasStored) {
+      showAuthView('login');
+      $('loginPassword').value = '';
+      setTimeout(() => $('loginPassword').focus(), 50);
+    } else {
+      showAuthView('setup');
+      setTimeout(() => $('setupOrgId').focus(), 50);
+    }
+  }
+
+  function showAuthView(name) {
     viewLogin.style.display  = name === 'login'  ? 'block' : 'none';
     viewSetup.style.display  = name === 'setup'  ? 'block' : 'none';
     viewChange.style.display = name === 'change' ? 'block' : 'none';
   }
 
-  function showOverlay(view) {
-    clearAuthError();
-    authOverlay.style.display = 'flex';
-    const hasStored = !!localStorage.getItem(LS_KEY);
-    if (view === 'change' && hasStored) {
-      showView('change');
-      // FIX 3: only pre-fill orgId when actively logged in (not when locked)
-      document.getElementById('changeOrgId').value = sessionApiKey ? (sessionOrgId || '') : '';
-      document.getElementById('changeApiKey').value = '';
-      document.getElementById('changeCurrentPw').value = '';
-      document.getElementById('changeNewPw').value = '';
-      document.getElementById('changeNewPw2').value = '';
-      setTimeout(() => document.getElementById('changeCurrentPw').focus(), 50);
-    } else if (hasStored) {
-      showView('login');
-      document.getElementById('loginPassword').value = '';
-      setTimeout(() => document.getElementById('loginPassword').focus(), 50);
-    } else {
-      showView('setup');
-      setTimeout(() => document.getElementById('setupOrgId').focus(), 50);
-    }
+  function showAuthError(msg) {
+    authError.textContent  = msg;
+    authError.style.display = 'block';
   }
 
-  function hideOverlay(orgId, apiKey) {
-    sessionOrgId = orgId;
-    sessionApiKey = apiKey;
-    // Populate hidden inputs used by fetch/confirm
-    document.getElementById('orgId').value = orgId;
-    document.getElementById('apiKey').value = apiKey;
-    authOverlay.style.display = 'none';
-    startAutoLock();
-    checkReady();
+  function clearAuthError() {
+    authError.textContent  = '';
+    authError.style.display = 'none';
   }
 
-  function lock() {
-    sessionOrgId = ''; sessionApiKey = '';
-    document.getElementById('orgId').value = '';
-    document.getElementById('apiKey').value = '';
-    clearAutoLock();
-    confirmInProgress = false; // FIX 2: prevent stuck confirm button after re-login
-    showOverlay('login');
+  function validateOrgId(id, label = 'Verenigings-ID') {
+    if (!id) return `Vul je ${label} in.`;
+    if (!UUID_RE.test(id)) return `Ongeldig ${label}. Gebruik de UUID uit je Stamhoofd-instellingen.`;
+    return null;
   }
 
-  // ── Auto-lock ──────────────────────────────────────────────────────────────
-
-  function startAutoLock() {
-    clearAutoLock();
-    lockAt = Date.now() + AUTO_LOCK_MS;
-    lockTimer = setTimeout(lock, AUTO_LOCK_MS);
-    updateLockCountdown();
-    lockCountdownInterval = setInterval(updateLockCountdown, 30000);
+  function setButtonBusy(btn, label) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> ' + label;
   }
 
-  function clearAutoLock() {
-    clearTimeout(lockTimer);
-    clearInterval(lockCountdownInterval);
-    lockTimer = lockCountdownInterval = null;
-    lockAt = null;
-    document.getElementById('lockTimer').textContent = '';
+  function setButtonIdle(btn, label) {
+    btn.disabled = false;
+    btn.textContent = label;
   }
 
-  function resetAutoLock() {
-    if (lockAt !== null) startAutoLock();
-  }
+  // ==========================================================================
+  // AUTH — LOGIN
+  // ==========================================================================
 
-  function updateLockCountdown() {
-    if (!lockAt) return;
-    const mins = Math.max(0, Math.ceil((lockAt - Date.now()) / 60000));
-    document.getElementById('lockTimer').textContent = `Auto-lock over ${mins} min`;
-  }
+  btnLogin.addEventListener('click', handleLogin);
+  $('loginPassword').addEventListener('keydown', e => { if (e.key === 'Enter') handleLogin(); });
 
-  // FIX 6: Only reset inactivity timer when a session is actually active
-  function maybeResetAutoLock() {
-    if (sessionApiKey) resetAutoLock();
-  }
-  document.addEventListener('click', maybeResetAutoLock);
-  document.addEventListener('keydown', maybeResetAutoLock);
-
-  // FIX 4: Lock immediately when tab becomes hidden
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden' && sessionApiKey) {
-      lock();
-    }
-  });
-
-  // ── Login handler ──────────────────────────────────────────────────────────
-
-  let loginFailCount = 0;
-  let loginLockedUntil = 0;
-
-  btnLogin.addEventListener('click', async () => {
+  async function handleLogin() {
     clearAuthError();
 
-    // FIX 1: brute-force throttle
+    // Brute-force back-off
     const now = Date.now();
     if (now < loginLockedUntil) {
       const secs = Math.ceil((loginLockedUntil - now) / 1000);
@@ -833,223 +890,167 @@
       return;
     }
 
-    const pw = document.getElementById('loginPassword').value;
+    const pw = $('loginPassword').value;
     if (!pw) { showAuthError('Voer je wachtwoord in.'); return; }
+
     const stored = localStorage.getItem(LS_KEY);
-    if (!stored) { showOverlay('login'); return; }
-    btnLogin.disabled = true;
-    btnLogin.innerHTML = '<span class="spinner"></span> Bezig...';
+    if (!stored) { showAuthOverlay('login'); return; }
+
+    setButtonBusy(btnLogin, 'Bezig...');
     try {
       const { orgId, apiKey } = await decryptCredentials(stored, pw);
-      loginFailCount = 0;
+      loginFailCount   = 0;
       loginLockedUntil = 0;
-      hideOverlay(orgId, apiKey);
+      startSession(orgId, apiKey);
     } catch {
       loginFailCount++;
-      // Exponential back-off: 5s, 10s, 20s, capped at 60s
-      const delay = Math.min(5000 * Math.pow(2, loginFailCount - 1), 60000);
+      const delay = Math.min(5000 * Math.pow(2, loginFailCount - 1), 60_000);
       loginLockedUntil = Date.now() + delay;
       const secs = Math.ceil(delay / 1000);
-      showAuthError(`Onjuist wachtwoord. Wacht ${secs} seconden voor de volgende poging. (${loginFailCount} mislukte poging${loginFailCount > 1 ? 'en' : ''})`);
+      showAuthError(
+        `Onjuist wachtwoord. Wacht ${secs}s voor de volgende poging.` +
+        ` (${loginFailCount} mislukte poging${loginFailCount > 1 ? 'en' : ''})`
+      );
     }
-    btnLogin.disabled = false;
-    btnLogin.textContent = 'Inloggen';
-  });
+    setButtonIdle(btnLogin, 'Inloggen');
+  }
 
-  document.getElementById('loginPassword').addEventListener('keydown', e => {
-    if (e.key === 'Enter') btnLogin.click();
-  });
+  // ==========================================================================
+  // AUTH — SETUP (first run)
+  // ==========================================================================
 
-  // ── Setup handler ──────────────────────────────────────────────────────────
+  btnSetup.addEventListener('click', handleSetup);
 
-  btnSetup.addEventListener('click', async () => {
+  async function handleSetup() {
     clearAuthError();
-    const orgId = document.getElementById('setupOrgId').value.trim();
-    const apiKey = document.getElementById('setupApiKey').value.trim();
-    const pw1 = document.getElementById('setupPassword').value;
-    const pw2 = document.getElementById('setupPassword2').value;
+    const orgId = $('setupOrgId').value.trim();
+    const apiKey = $('setupApiKey').value.trim();
+    const pw1   = $('setupPassword').value;
+    const pw2   = $('setupPassword2').value;
 
-    if (!orgId || !apiKey) { showAuthError('Vul je Verenigings-ID en API-sleutel in.'); return; }
-    if (!/^[0-9a-f-]{36}$/i.test(orgId)) { showAuthError('Ongeldig Verenigings-ID. Gebruik de UUID uit je Stamhoofd-instellingen.'); return; }
+    const orgErr = validateOrgId(orgId);
+    if (orgErr) { showAuthError(orgErr); return; }
+    if (!apiKey) { showAuthError('Vul je API-sleutel in.'); return; }
     if (pw1.length < 8) { showAuthError('Kies een wachtwoord van minimaal 8 tekens.'); return; }
-    if (pw1 !== pw2) { showAuthError('Wachtwoorden komen niet overeen.'); return; }
+    if (pw1 !== pw2)    { showAuthError('Wachtwoorden komen niet overeen.'); return; }
 
-    btnSetup.disabled = true;
-    btnSetup.innerHTML = '<span class="spinner"></span> Opslaan...';
+    setButtonBusy(btnSetup, 'Opslaan...');
     try {
-      const enc = await encryptCredentials(orgId, apiKey, pw1);
-      localStorage.setItem(LS_KEY, enc);
-      hideOverlay(orgId, apiKey);
+      localStorage.setItem(LS_KEY, await encryptCredentials(orgId, apiKey, pw1));
+      startSession(orgId, apiKey);
     } catch (err) {
       showAuthError('Fout bij opslaan: ' + err.message);
     }
-    btnSetup.disabled = false;
-    btnSetup.textContent = 'Opslaan & inloggen';
+    setButtonIdle(btnSetup, 'Opslaan & inloggen');
+  }
+
+  // ==========================================================================
+  // AUTH — CHANGE CREDENTIALS
+  // ==========================================================================
+
+  btnChangeCreds.addEventListener('click', () => { stopAutoLock(); showAuthOverlay('change'); });
+  linkChangeWhileLocked.addEventListener('click', e => { e.preventDefault(); showAuthOverlay('change'); });
+  btnLock.addEventListener('click', lock);
+
+  $('btnCancelChange').addEventListener('click', () => {
+    clearAuthError();
+    if (sessionApiKey) {
+      authOverlay.style.display = 'none';
+      startAutoLock();
+    } else {
+      showAuthOverlay('login');
+    }
   });
 
-  // ── Reset / lock buttons ───────────────────────────────────────────────────
+  $('btnChange').addEventListener('click', handleChangeCredentials);
+
+  async function handleChangeCredentials() {
+    clearAuthError();
+    const currentPw = $('changeCurrentPw').value;
+    const newOrgId  = $('changeOrgId').value.trim();
+    const newApiKey = $('changeApiKey').value.trim();
+    const newPw     = $('changeNewPw').value;
+    const newPw2    = $('changeNewPw2').value;
+
+    if (!currentPw) { showAuthError('Voer je huidige wachtwoord in ter verificatie.'); return; }
+
+    if (newOrgId) {
+      const orgErr = validateOrgId(newOrgId);
+      if (orgErr) { showAuthError(orgErr); return; }
+    }
+    if (newPw && newPw.length < 8) { showAuthError('Nieuw wachtwoord moet minimaal 8 tekens bevatten.'); return; }
+    if (newPw && newPw !== newPw2) { showAuthError('Nieuwe wachtwoorden komen niet overeen.'); return; }
+
+    const btn = $('btnChange');
+    setButtonBusy(btn, 'Bezig...');
+
+    const stored = localStorage.getItem(LS_KEY);
+    if (!stored) { showAuthError('Geen opgeslagen gegevens gevonden.'); setButtonIdle(btn, 'Opslaan'); return; }
+
+    try {
+      const existing = await decryptCredentials(stored, currentPw);
+      const finalOrgId  = newOrgId  || existing.orgId;
+      const finalApiKey = newApiKey || existing.apiKey;
+      const finalPw     = newPw     || currentPw;
+
+      localStorage.setItem(LS_KEY, await encryptCredentials(finalOrgId, finalApiKey, finalPw));
+      startSession(finalOrgId, finalApiKey);
+    } catch {
+      showAuthError('Verificatie mislukt. Controleer je huidige wachtwoord.');
+    }
+    setButtonIdle(btn, 'Opslaan');
+  }
 
   linkReset.addEventListener('click', e => {
     e.preventDefault();
     if (confirm('Dit wist je opgeslagen inloggegevens. Je moet daarna opnieuw je API-sleutel en wachtwoord instellen. Doorgaan?')) {
       localStorage.removeItem(LS_KEY);
-      showOverlay('login');
+      showAuthOverlay('login');
     }
   });
 
-  btnLock.addEventListener('click', lock);
+  // ==========================================================================
+  // CSV PARSING
+  // ==========================================================================
 
-  // ── Change credentials handler ─────────────────────────────────────────────
-
-  // Open change view from header (while logged in)
-  btnChangeCreds.addEventListener('click', () => {
-    clearAutoLock();
-    showOverlay('change');
-  });
-
-  // Open change view from login screen (while locked)
-  linkChangeWhileLocked.addEventListener('click', e => {
-    e.preventDefault();
-    showOverlay('change');
-  });
-
-  // Cancel change — go back to login
-  document.getElementById('btnCancelChange').addEventListener('click', () => {
-    clearAuthError();
-    if (sessionApiKey) {
-      // User was logged in before opening change view
-      authOverlay.style.display = 'none';
-      startAutoLock();
-    } else {
-      showOverlay('login');
-    }
-  });
-
-  document.getElementById('btnChange').addEventListener('click', async () => {
-    clearAuthError();
-    const currentPw   = document.getElementById('changeCurrentPw').value;
-    const newOrgId    = document.getElementById('changeOrgId').value.trim();
-    const newApiKey   = document.getElementById('changeApiKey').value.trim();
-    const newPw       = document.getElementById('changeNewPw').value;
-    const newPw2      = document.getElementById('changeNewPw2').value;
-
-    if (!currentPw) { showAuthError('Voer je huidige wachtwoord in ter verificatie.'); return; }
-
-    // Validate optional new values
-    if (newOrgId && !/^[0-9a-f-]{36}$/i.test(newOrgId)) {
-      showAuthError('Ongeldig Verenigings-ID. Gebruik de UUID uit je Stamhoofd-instellingen.'); return;
-    }
-    if (newPw && newPw.length < 8) { showAuthError('Nieuw wachtwoord moet minimaal 8 tekens bevatten.'); return; }
-    if (newPw && newPw !== newPw2) { showAuthError('Nieuwe wachtwoorden komen niet overeen.'); return; }
-
-    const btn = document.getElementById('btnChange');
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner"></span> Bezig...';
-
-    // FIX 5: use typed sentinel instead of fragile string match
-    let changeErrMsg = null;
-    try {
-      const stored = localStorage.getItem(LS_KEY);
-      if (!stored) {
-        changeErrMsg = 'Geen opgeslagen gegevens gevonden.';
-        throw new Error('no_stored');
-      }
-      const existing = await decryptCredentials(stored, currentPw);
-
-      // Merge: use new values where provided, keep existing otherwise
-      const finalOrgId  = newOrgId  || existing.orgId;
-      const finalApiKey = newApiKey || existing.apiKey;
-      const finalPw     = newPw     || currentPw;
-
-      const enc = await encryptCredentials(finalOrgId, finalApiKey, finalPw);
-      localStorage.setItem(LS_KEY, enc);
-
-      // Update live session
-      hideOverlay(finalOrgId, finalApiKey);
-    } catch (err) {
-      showAuthError(changeErrMsg || 'Verificatie mislukt. Controleer je huidige wachtwoord.');
-    }
-
-    btn.disabled = false;
-    btn.textContent = 'Opslaan';
-  });
-
-  // ── Boot: show overlay ─────────────────────────────────────────────────────
-  showOverlay('login');
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // MAIN APP
-  // ══════════════════════════════════════════════════════════════════════════
-
-  // ── State ──────────────────────────────────────────────────────────────────
-  let csvRows = [];
-  let openPayments = [];
-  let matches = []; // { payment, csvRow, structRef }
-
-  // ── DOM refs ───────────────────────────────────────────────────────────────
-  const orgIdEl   = document.getElementById('orgId');
-  const apiKeyEl  = document.getElementById('apiKey');
-  const fileInput = document.getElementById('fileInput');
-  const dropZone  = document.getElementById('dropZone');
-  const dropLabel = document.getElementById('dropLabel');
-  const btnFetch  = document.getElementById('btnFetch');
-  const btnConfirm= document.getElementById('btnConfirm');
-  const btnReset  = document.getElementById('btnReset');
-  const btnStartOver = document.getElementById('btnStartOver');
-
-  // ── Enable button when ready ───────────────────────────────────────────────
-  function checkReady() {
-    btnFetch.disabled = !(orgIdEl.value.trim() && apiKeyEl.value.trim() && csvRows.length > 0);
+  function normalizeRef(raw) {
+    if (!raw) return '';
+    const digits = raw.replace(/\D/g, '');
+    if (digits.length !== 12) return '';
+    return `+++${digits.slice(0, 3)}/${digits.slice(3, 7)}/${digits.slice(7)}+++`;
   }
 
-  // ── File handling ──────────────────────────────────────────────────────────
-  fileInput.addEventListener('change', e => handleFile(e.target.files[0]));
-
-  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
-  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
-  dropZone.addEventListener('drop', e => {
-    e.preventDefault();
-    dropZone.classList.remove('drag-over');
-    handleFile(e.dataTransfer.files[0]);
-  });
-
-  function handleFile(file) {
-    if (!file) return;
-    // FIX 7: reject suspiciously large files before reading into memory
-    if (file.size > 5_000_000) {
-      setStatus('status1', 'error', 'Bestand is te groot (max 5 MB). Controleer of je het juiste bestand hebt geselecteerd.');
-      return;
+  function findCol(headers, candidates) {
+    for (const candidate of candidates) {
+      const idx = headers.findIndex(h => h.includes(candidate));
+      if (idx >= 0) return idx;
     }
-    const reader = new FileReader();
-    reader.onload = e => {
-      const text = e.target.result;
-      csvRows = parseKBCcsv(text);
-      if (csvRows.length === 0) {
-        setStatus('status1', 'error', '⚠ Geen geldige KBC-transacties gevonden in dit bestand.');
-        return;
-      }
-      dropLabel.textContent = `✓ ${file.name} (${csvRows.length} transacties geladen)`;
-      dropZone.classList.add('file-selected');
-      setStatus('status1', 'info', `${csvRows.length} transacties ingelezen. Vul je API-sleutel in en klik op "Betalingen ophalen".`);
-      checkReady();
-    };
-    reader.readAsText(file, 'UTF-8');
+    return -1;
   }
 
-  // ── KBC CSV parser ─────────────────────────────────────────────────────────
-  // KBC CSV uses semicolons: Rekeningnummer;...;gestructureerde mededeling;Vrije mededeling
+  function splitCSVLine(line, sep) {
+    const cells = [];
+    let cur = '', inQuotes = false;
+    for (const ch of line) {
+      if (ch === '"')           inQuotes = !inQuotes;
+      else if (ch === sep && !inQuotes) { cells.push(cur.trim()); cur = ''; }
+      else                      cur += ch;
+    }
+    cells.push(cur.trim());
+    return cells;
+  }
+
   function parseKBCcsv(text) {
-    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1); // strip UTF-8 BOM
-    // KBC uses CR-only line endings; normalise to \n before splitting
+    // Strip UTF-8 BOM and normalise line endings (KBC uses CR-only)
+    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
     text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
     const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
     if (lines.length < 2) return [];
 
-    // Detect separator (semicolon or comma)
-    const sep = lines[0].includes(';') ? ';' : ',';
+    const sep     = lines[0].includes(';') ? ';' : ',';
     const headers = lines[0].split(sep).map(h => h.replace(/^"|"$/g, '').trim().toLowerCase());
 
-    // Find relevant column indices
     const colRef  = findCol(headers, ['gestructureerde mededeling', 'structured communication', 'mededeling', 'ref']);
     const colFree = findCol(headers, ['vrije mededeling', 'free communication', 'omschrijving', 'description']);
     const colAmt  = findCol(headers, ['bedrag', 'amount', 'credit']);
@@ -1059,282 +1060,321 @@
     const rows = [];
     for (let i = 1; i < lines.length; i++) {
       const cells = splitCSVLine(lines[i], sep);
-      const raw = (colRef >= 0 ? cells[colRef] : '') || '';
-      const ref = normalizeRef(raw);
+      const raw   = (colRef >= 0 ? cells[colRef] : '') || '';
+      const ref   = normalizeRef(raw);
       if (!ref && !cells[colFree]) continue;
       rows.push({
         structRef: ref,
-        freeRef: cells[colFree] || '',
-        amount: cells[colAmt] || '',
-        date: cells[colDate] || '',
-        name: colName >= 0 ? cells[colName] || '' : '',
-        raw: lines[i],
+        freeRef:   cells[colFree]  || '',
+        amount:    cells[colAmt]   || '',
+        date:      cells[colDate]  || '',
+        name:      colName >= 0 ? cells[colName] || '' : '',
       });
     }
     return rows;
   }
 
-  function findCol(headers, candidates) {
-    for (const c of candidates) {
-      const idx = headers.findIndex(h => h.includes(c));
-      if (idx >= 0) return idx;
+  // ==========================================================================
+  // FILE HANDLING
+  // ==========================================================================
+
+  fileInput.addEventListener('change', e => loadFile(e.target.files[0]));
+  dropZone.addEventListener('dragover',  e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+  dropZone.addEventListener('dragleave', ()  => dropZone.classList.remove('drag-over'));
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    loadFile(e.dataTransfer.files[0]);
+  });
+
+  function loadFile(file) {
+    if (!file) return;
+    if (file.size > MAX_FILE_SIZE) {
+      setStatus('status1', 'error', 'Bestand is te groot (max 5 MB). Controleer of je het juiste bestand hebt geselecteerd.');
+      return;
     }
-    return -1;
+    const reader = new FileReader();
+    reader.onload = e => {
+      csvRows = parseKBCcsv(e.target.result);
+      if (csvRows.length === 0) {
+        setStatus('status1', 'error', '⚠ Geen geldige KBC-transacties gevonden in dit bestand.');
+        return;
+      }
+      dropLabel.textContent = `✓ ${file.name} (${csvRows.length} transacties geladen)`;
+      dropZone.classList.add('file-selected');
+      setStatus('status1', 'info', `${csvRows.length} transacties ingelezen. Klik op "Betalingen ophalen" om te matchen.`);
+      updateFetchButton();
+    };
+    reader.readAsText(file, 'UTF-8');
   }
 
-  function splitCSVLine(line, sep) {
-    const result = [];
-    let cur = '', inQ = false;
-    for (const ch of line) {
-      if (ch === '"') { inQ = !inQ; }
-      else if (ch === sep && !inQ) { result.push(cur.trim()); cur = ''; }
-      else { cur += ch; }
-    }
-    result.push(cur.trim());
-    return result;
+  // ==========================================================================
+  // MATCHING
+  // ==========================================================================
+
+  function matchPayments(pending) {
+    const usedRefs = new Set();
+    return pending.map(payment => {
+      const ref    = normalizeRef(payment.transferDescription || '');
+      const csvRow = csvRows.find(row => row.structRef && row.structRef === ref && !usedRefs.has(ref)) || null;
+      if (csvRow && ref) usedRefs.add(ref);
+      return { payment, csvRow, structRef: ref };
+    });
   }
 
-  // Normalize: keep only digits, then format as +++xxx/xxxx/xxxxx+++
-  function normalizeRef(raw) {
-    if (!raw) return '';
-    // Remove all non-digits
-    const digits = raw.replace(/\D/g, '');
-    if (digits.length !== 12) return '';
-    // Reconstruct +++ddd/dddd/ddddd+++
-    return `+++${digits.slice(0,3)}/${digits.slice(3,7)}/${digits.slice(7)}+++`;
-  }
+  // ==========================================================================
+  // FETCH PAYMENTS
+  // ==========================================================================
 
-  // ── Fetch Stamhoofd open payments ──────────────────────────────────────────
-  btnFetch.addEventListener('click', async () => {
-    const orgId = orgIdEl.value.trim();
+  btnFetch.addEventListener('click', handleFetch);
+
+  async function handleFetch() {
+    const orgId  = orgIdEl.value.trim();
     const apiKey = apiKeyEl.value.trim();
     if (!orgId || !apiKey) return;
 
-    btnFetch.innerHTML = '<span class="spinner"></span> Bezig...';
-    btnFetch.disabled = true;
+    setButtonBusy(btnFetch, 'Bezig...');
     setStatus('status1', 'info', 'Openstaande betalingen ophalen uit Stamhoofd...');
 
     try {
-      if (!/^[0-9a-f-]{36}$/i.test(orgId)) throw new Error('Ongeldig verenigings-ID. Gebruik de UUID uit je Stamhoofd-instellingen.');
-      const url = `https://${orgId}.api.stamhoofd.app/v191/organization/payments`;
-      const resp = await fetch(url, {
+      if (!UUID_RE.test(orgId)) throw new Error('Ongeldig verenigings-ID. Gebruik de UUID uit je Stamhoofd-instellingen.');
+
+      const resp = await fetch(`https://${orgId}.api.stamhoofd.app/v191/organization/payments`, {
         headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
       });
-
       if (!resp.ok) throw new Error(`API-fout ${resp.status}. Controleer je verenigings-ID en API-sleutel.`);
-      openPayments = await resp.json();
 
-      // Only bank transfers that are not yet paid
+      openPayments = await resp.json();
       const pending = openPayments.filter(p => p.method === 'Transfer' && p.status !== 'Succeeded');
 
       if (pending.length === 0) {
         setStatus('status1', 'warn', 'Geen openstaande bankoverschrijvingen gevonden in Stamhoofd.');
-        btnFetch.innerHTML = 'Betalingen ophalen & matchen';
-        btnFetch.disabled = false;
+        setButtonIdle(btnFetch, 'Betalingen ophalen & matchen');
         return;
       }
 
-      // Match — track used CSV refs to avoid double-marking same transfer
-      matches = [];
-      const usedCsvRefs = new Set();
-      for (const payment of pending) {
-        const pRef = normalizeRef(payment.transferDescription || '');
-        const csvRow = csvRows.find(row => row.structRef && row.structRef === pRef && !usedCsvRefs.has(pRef));
-        if (csvRow && pRef) usedCsvRefs.add(pRef);
-        matches.push({ payment, csvRow: csvRow || null, structRef: pRef });
-      }
-
-      showResults(matches);
-      document.getElementById('step2').style.display = 'block';
-      document.getElementById('step2').scrollIntoView({ behavior: 'smooth' });
+      matches = matchPayments(pending);
+      renderResultsTable(matches);
+      $('step2').style.display = 'block';
+      $('step2').scrollIntoView({ behavior: 'smooth' });
       setStatus('status1', 'success', `${pending.length} openstaande betalingen opgehaald.`);
 
     } catch (err) {
       setStatus('status1', 'error', `Fout: ${err.message}`);
     }
 
-    btnFetch.innerHTML = 'Betalingen ophalen &amp; matchen';
-    btnFetch.disabled = false;
-  });
+    setButtonIdle(btnFetch, 'Betalingen ophalen & matchen');
+  }
 
-  // ── Show results table ─────────────────────────────────────────────────────
-  function showResults(matches) {
-    const matched = matches.filter(m => m.csvRow);
-    const unmatched = matches.filter(m => !m.csvRow);
+  // ==========================================================================
+  // RESULTS TABLE
+  // ==========================================================================
 
-    // Summary chips — only numbers, safe
-    document.getElementById('summaryRow').innerHTML =
-      `<div class="summary-chip chip-green"><div class="chip-val">${matched.length}</div><div class="chip-label">Gevonden in CSV</div></div>` +
-      `<div class="summary-chip chip-yellow"><div class="chip-val">${unmatched.length}</div><div class="chip-label">Nog niet betaald</div></div>` +
-      `<div class="summary-chip chip-accent"><div class="chip-val">${matches.length}</div><div class="chip-label">Totaal openstaand</div></div>`;
+  function renderResultsTable(matches) {
+    const matchedCount   = matches.filter(m => m.csvRow).length;
+    const unmatchedCount = matches.length - matchedCount;
 
-    // Build table using DOM API to prevent XSS from API/CSV data
+    // Summary chips (numeric values only — safe to inject)
+    $('summaryRow').innerHTML =
+      chip('chip-green',  matchedCount,   'Gevonden in CSV') +
+      chip('chip-yellow', unmatchedCount, 'Nog niet betaald') +
+      chip('chip-accent', matches.length, 'Totaal openstaand');
+
     const tbody = document.createElement('tbody');
-    for (const m of matches) {
-      const customer = m.payment.balanceItemPayments?.[0]?.balanceItem?.order?.data?.customer;
-      const name = customer ? `${customer.firstName} ${customer.lastName}` : '—';
-      const amountCents = typeof m.payment.price === 'number' ? m.payment.price : 0;
-      const amount = (amountCents / 100).toFixed(2).replace('.', ',') + ' €';
-      const structRef = m.structRef || m.payment.transferDescription || '—';
-      const csvDate = m.csvRow ? m.csvRow.date : '—';
-      // Only accept well-formed UUIDs to prevent injection via data-id
-      const safeId = /^[0-9a-f-]{36}$/i.test(m.payment.id || '') ? m.payment.id : '';
-
-      const tr = document.createElement('tr');
-
-      const tdCb = document.createElement('td');
-      tdCb.style.verticalAlign = 'middle';
-      const cb = document.createElement('input');
-      cb.type = 'checkbox'; cb.className = 'match-cb';
-      cb.dataset.id = safeId;
-      cb.checked = !!(m.csvRow && safeId);
-      cb.disabled = !(m.csvRow && safeId);
-      cb.style.cursor = cb.disabled ? 'pointer' : 'pointer';
-      tdCb.appendChild(cb);
-
-      // Override UI for unmatched rows — appended after lbl so it renders below
-      if (!m.csvRow && safeId) {
-        const warn = document.createElement('div');
-        warn.className = 'override-warn';
-        warn.style.display = 'none';
-        const warnText = document.createElement('span');
-        warnText.textContent = 'Niet gevonden in CSV — weet je zeker dat je dit handmatig wilt markeren?';
-        const overrideBtn = document.createElement('button');
-        overrideBtn.className = 'btn-override';
-        overrideBtn.textContent = 'Toch markeren';
-        overrideBtn.addEventListener('click', (e) => {
-          e.stopPropagation(); // prevent bubbling to tdCb which would re-hide warn
-          cb.disabled = false;
-          cb.checked = true;
-          warn.style.display = 'none';
-        });
-        warn.appendChild(warnText);
-        warn.appendChild(overrideBtn);
-        tdCb.appendChild(warn);
-
-        // Toggle warning when clicking the cell while the checkbox is still disabled
-        tdCb.addEventListener('click', (e) => {
-          if (cb.disabled) {
-            e.preventDefault();
-            warn.style.display = warn.style.display === 'none' ? 'flex' : 'none';
-          }
-        });
-      }
-
-      const tdName = document.createElement('td');
-      tdName.textContent = name;
-
-      const tdRef = document.createElement('td');
-      const refSpan = document.createElement('span');
-      refSpan.className = 'ref'; refSpan.textContent = structRef;
-      tdRef.appendChild(refSpan);
-
-      const tdAmt = document.createElement('td');
-      tdAmt.className = 'amount'; tdAmt.textContent = amount;
-
-      const tdBadge = document.createElement('td');
-      const badge = document.createElement('span');
-      badge.className = `badge ${m.csvRow ? 'badge-match' : 'badge-nomatch'}`;
-      badge.textContent = m.csvRow ? '✓ Betaald' : '⏳ Niet gevonden';
-      tdBadge.appendChild(badge);
-
-      const tdDate = document.createElement('td');
-      const dateSpan = document.createElement('span');
-      dateSpan.className = 'small'; dateSpan.textContent = csvDate;
-      tdDate.appendChild(dateSpan);
-
-      tr.append(tdCb, tdName, tdRef, tdAmt, tdBadge, tdDate);
-      tbody.appendChild(tr);
-    }
+    for (const m of matches) tbody.appendChild(buildRow(m));
 
     const table = document.createElement('table');
     table.innerHTML = '<thead><tr><th></th><th>Klant</th><th>Referentie</th><th>Bedrag</th><th>Status in CSV</th><th>Betaaldatum</th></tr></thead>';
     table.appendChild(tbody);
-    const wrap = document.getElementById('tableWrap');
-    wrap.innerHTML = ''; wrap.appendChild(table);
 
-    if (matched.length === 0) {
+    const wrap = $('tableWrap');
+    wrap.innerHTML = '';
+    wrap.appendChild(table);
+
+    if (matchedCount === 0) {
       setStatus('status2', 'warn', 'Geen overeenkomsten gevonden. Controleer of de referentienummers kloppen.');
       btnConfirm.disabled = true;
     } else {
-      setStatus('status2', 'info', `${matched.length} betaling(en) klaar om als betaald te markeren. Controleer de selectie en klik op bevestigen.`);
+      setStatus('status2', 'info', `${matchedCount} betaling(en) klaar om als betaald te markeren. Controleer de selectie en klik op bevestigen.`);
       btnConfirm.disabled = false;
     }
   }
 
-    // ── Confirm: mark as paid ──────────────────────────────────────────────────
-  let confirmInProgress = false;
-  btnConfirm.addEventListener('click', async () => {
+  function chip(colorClass, value, label) {
+    return `<div class="summary-chip ${colorClass}"><div class="chip-val">${value}</div><div class="chip-label">${label}</div></div>`;
+  }
+
+  function buildRow(m) {
+    const customer    = m.payment.balanceItemPayments?.[0]?.balanceItem?.order?.data?.customer;
+    const name        = customer ? `${customer.firstName} ${customer.lastName}` : '—';
+    const amountCents = typeof m.payment.price === 'number' ? m.payment.price : 0;
+    const amount      = (amountCents / 100).toFixed(2).replace('.', ',') + ' €';
+    const structRef   = m.structRef || m.payment.transferDescription || '—';
+    const csvDate     = m.csvRow ? m.csvRow.date : '—';
+    const safeId      = UUID_RE.test(m.payment.id || '') ? m.payment.id : '';
+
+    const tr  = document.createElement('tr');
+    tr.append(
+      buildCheckboxCell(m, safeId),
+      td(name),
+      tdSpan(structRef, 'ref'),
+      td(amount, 'amount'),
+      tdSpan(m.csvRow ? '✓ Betaald' : '⏳ Niet gevonden', `badge ${m.csvRow ? 'badge-match' : 'badge-nomatch'}`),
+      tdSpan(csvDate, 'small'),
+    );
+    return tr;
+  }
+
+  function buildCheckboxCell(m, safeId) {
+    const cell = document.createElement('td');
+    cell.style.verticalAlign = 'middle';
+
+    const cb = document.createElement('input');
+    cb.type      = 'checkbox';
+    cb.className = 'match-cb';
+    cb.dataset.id = safeId;
+    cb.checked   = !!(m.csvRow && safeId);
+    cb.disabled  = !(m.csvRow && safeId);
+    cb.style.cursor = 'pointer';
+    cell.appendChild(cb);
+
+    if (!m.csvRow && safeId) {
+      const warn = buildOverrideWarning(cb);
+      cell.appendChild(warn);
+      cell.addEventListener('click', () => {
+        if (cb.disabled) warn.style.display = warn.style.display === 'none' ? 'flex' : 'none';
+      });
+    }
+    return cell;
+  }
+
+  function buildOverrideWarning(cb) {
+    const warn = document.createElement('div');
+    warn.className    = 'override-warn';
+    warn.style.display = 'none';
+
+    const text = document.createElement('span');
+    text.textContent = 'Niet gevonden in CSV — weet je zeker dat je dit handmatig wilt markeren?';
+
+    const btn = document.createElement('button');
+    btn.className   = 'btn-override';
+    btn.textContent = 'Toch markeren';
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      cb.disabled = false;
+      cb.checked  = true;
+      warn.style.display = 'none';
+    });
+
+    warn.append(text, btn);
+    return warn;
+  }
+
+  // Small DOM helpers to reduce boilerplate
+  function td(text, className) {
+    const el = document.createElement('td');
+    if (className) el.className = className;
+    el.textContent = text;
+    return el;
+  }
+
+  function tdSpan(text, spanClass) {
+    const cell = document.createElement('td');
+    const span = document.createElement('span');
+    span.className   = spanClass;
+    span.textContent = text;
+    cell.appendChild(span);
+    return cell;
+  }
+
+  // ==========================================================================
+  // CONFIRM — MARK AS PAID
+  // ==========================================================================
+
+  btnConfirm.addEventListener('click', handleConfirm);
+
+  async function handleConfirm() {
     if (confirmInProgress) return;
     confirmInProgress = true;
-    const orgId = orgIdEl.value.trim();
-    const apiKey = apiKeyEl.value.trim();
 
-    // Collect checked payment IDs
     const checkedIds = [...document.querySelectorAll('.match-cb:checked')].map(cb => cb.dataset.id);
     if (checkedIds.length === 0) {
       setStatus('status2', 'warn', 'Geen betalingen geselecteerd.');
+      confirmInProgress = false;
       return;
     }
 
-    btnConfirm.innerHTML = '<span class="spinner"></span> Bezig met markeren...';
-    btnConfirm.disabled = true;
-
-    const changes = checkedIds.map(id => ({
-      patch: { status: 'Succeeded', id, _isPatch: true }
-    }));
+    setButtonBusy(btnConfirm, 'Bezig met markeren...');
 
     try {
-      if (!/^[0-9a-f-]{36}$/i.test(orgId)) throw new Error('Ongeldig verenigings-ID.');
-      const url = `https://${orgId}.api.stamhoofd.app/v191/organization/payments`;
-      const resp = await fetch(url, {
-        method: 'PATCH',
-        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ _isPatch: true, changes })
-      });
+      const orgId  = orgIdEl.value.trim();
+      const apiKey = apiKeyEl.value.trim();
+      if (!UUID_RE.test(orgId)) throw new Error('Ongeldig verenigings-ID.');
 
+      const changes = checkedIds.map(id => ({ patch: { status: 'Succeeded', id, _isPatch: true } }));
+      const resp = await fetch(`https://${orgId}.api.stamhoofd.app/v191/organization/payments`, {
+        method:  'PATCH',
+        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ _isPatch: true, changes }),
+      });
       if (!resp.ok) throw new Error(`API-fout ${resp.status} bij opslaan. Controleer je instellingen.`);
 
-      document.getElementById('step2').style.display = 'none';
-      document.getElementById('step3').style.display = 'block';
-      document.getElementById('doneMsg').textContent = `${checkedIds.length} betaling(en) zijn gemarkeerd als betaald in Stamhoofd.`;
-      document.getElementById('step3').scrollIntoView({ behavior: 'smooth' });
+      $('step2').style.display = 'none';
+      $('step3').style.display = 'block';
+      $('doneMsg').textContent = `${checkedIds.length} betaling(en) zijn gemarkeerd als betaald in Stamhoofd.`;
+      $('step3').scrollIntoView({ behavior: 'smooth' });
 
     } catch (err) {
       setStatus('status2', 'error', `Fout bij opslaan: ${err.message}`);
-      btnConfirm.innerHTML = '✓ Markeer als betaald in Stamhoofd';
-      btnConfirm.disabled = false;
+      setButtonIdle(btnConfirm, '✓ Markeer als betaald in Stamhoofd');
     }
-    confirmInProgress = false;
-  });
 
-  // ── Reset ──────────────────────────────────────────────────────────────────
+    confirmInProgress = false;
+  }
+
+  // ==========================================================================
+  // RESET
+  // ==========================================================================
+
+  btnReset.addEventListener('click',    doReset);
+  btnStartOver.addEventListener('click', doReset);
+
   function doReset() {
     csvRows = []; openPayments = []; matches = [];
     fileInput.value = '';
     dropLabel.textContent = 'Sleep je CSV hier naartoe of klik om te bladeren';
     dropZone.classList.remove('file-selected');
-    document.getElementById('step2').style.display = 'none';
-    document.getElementById('step3').style.display = 'none';
-    document.getElementById('status1').innerHTML = '';
-    document.getElementById('status2').innerHTML = '';
-    btnFetch.disabled = true;
+    $('step2').style.display = 'none';
+    $('step3').style.display = 'none';
+    $('status1').innerHTML   = '';
+    $('status2').innerHTML   = '';
+    updateFetchButton();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  btnReset.addEventListener('click', doReset);
-  btnStartOver.addEventListener('click', doReset);
+  // ==========================================================================
+  // HELPERS
+  // ==========================================================================
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
-  function setStatus(id, type, msg) {
-    const icons = { info: 'ℹ', success: '✓', warn: '⚠', error: '✕' };
-    const div = document.createElement('div');
-    div.className = `status-bar ${type}`;
-    div.textContent = `${icons[type]} ${msg}`;
-    const container = document.getElementById(id);
-    container.innerHTML = '';
-    container.appendChild(div);
+  function updateFetchButton() {
+    btnFetch.disabled = !(orgIdEl.value.trim() && apiKeyEl.value.trim() && csvRows.length > 0);
   }
+
+  function setStatus(containerId, type, msg) {
+    const icons = { info: 'ℹ', success: '✓', warn: '⚠', error: '✕' };
+    const el = document.createElement('div');
+    el.className   = `status-bar ${type}`;
+    el.textContent = `${icons[type]} ${msg}`;
+    const container = $(containerId);
+    container.innerHTML = '';
+    container.appendChild(el);
+  }
+
+  // ==========================================================================
+  // BOOT
+  // ==========================================================================
+
+  showAuthOverlay('login');
 </script>
 </body>
 </html>
