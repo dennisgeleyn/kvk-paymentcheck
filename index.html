@@ -1192,7 +1192,9 @@
       cb.disabled = !(m.csvRow && safeId);
       lbl.appendChild(cb);
 
-      // Override UI for unmatched rows
+      tdCb.appendChild(lbl);
+
+      // Override UI for unmatched rows — appended after lbl so it renders below
       if (!m.csvRow && safeId) {
         const warn = document.createElement('div');
         warn.className = 'override-warn';
@@ -1202,27 +1204,24 @@
         const overrideBtn = document.createElement('button');
         overrideBtn.className = 'btn-override';
         overrideBtn.textContent = 'Toch markeren';
-        overrideBtn.addEventListener('click', () => {
+        overrideBtn.addEventListener('click', (e) => {
+          e.stopPropagation(); // prevent bubbling to tdCb which would re-hide warn
           cb.disabled = false;
           cb.checked = true;
           warn.style.display = 'none';
         });
         warn.appendChild(warnText);
         warn.appendChild(overrideBtn);
+        tdCb.appendChild(warn);
 
-        // Show warning when clicking anywhere in the cell while checkbox is disabled.
-        // Listen on tdCb (not lbl) to avoid the browser's label→checkbox focus
-        // behaviour swallowing the event before our handler runs.
+        // Toggle warning when clicking the cell while the checkbox is still disabled
         tdCb.addEventListener('click', (e) => {
-          if (cb.disabled && !e.target.classList.contains('btn-override')) {
+          if (cb.disabled) {
             e.preventDefault();
             warn.style.display = warn.style.display === 'none' ? 'flex' : 'none';
           }
         });
-        tdCb.appendChild(warn);
       }
-
-      tdCb.appendChild(lbl);
 
       const tdName = document.createElement('td');
       tdName.textContent = name;
