@@ -706,8 +706,8 @@
     const hasStored = !!localStorage.getItem(LS_KEY);
     if (view === 'change' && hasStored) {
       showView('change');
-      // Pre-fill org/key from session if available
-      document.getElementById('changeOrgId').value = sessionOrgId || '';
+      // FIX 3: only pre-fill orgId when actively logged in (not when locked)
+      document.getElementById('changeOrgId').value = sessionApiKey ? (sessionOrgId || '') : '';
       document.getElementById('changeApiKey').value = '';
       document.getElementById('changeCurrentPw').value = '';
       document.getElementById('changeNewPw').value = '';
@@ -739,6 +739,7 @@
     document.getElementById('orgId').value = '';
     document.getElementById('apiKey').value = '';
     clearAutoLock();
+    confirmInProgress = false; // FIX 2: prevent stuck confirm button after re-login
     showOverlay('login');
   }
 
@@ -770,25 +771,54 @@
     document.getElementById('lockTimer').textContent = `Auto-lock over ${mins} min`;
   }
 
-  // Reset inactivity timer on user interaction
-  document.addEventListener('click', resetAutoLock);
-  document.addEventListener('keydown', resetAutoLock);
+  // FIX 6: Only reset inactivity timer when a session is actually active
+  function maybeResetAutoLock() {
+    if (sessionApiKey) resetAutoLock();
+  }
+  document.addEventListener('click', maybeResetAutoLock);
+  document.addEventListener('keydown', maybeResetAutoLock);
+
+  // FIX 4: Lock immediately when tab becomes hidden
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden' && sessionApiKey) {
+      lock();
+    }
+  });
 
   // ── Login handler ──────────────────────────────────────────────────────────
 
+  let loginFailCount = 0;
+  let loginLockedUntil = 0;
+
   btnLogin.addEventListener('click', async () => {
     clearAuthError();
+
+    // FIX 1: brute-force throttle
+    const now = Date.now();
+    if (now < loginLockedUntil) {
+      const secs = Math.ceil((loginLockedUntil - now) / 1000);
+      showAuthError(`Te veel pogingen. Probeer opnieuw over ${secs} seconden.`);
+      return;
+    }
+
     const pw = document.getElementById('loginPassword').value;
     if (!pw) { showAuthError('Voer je wachtwoord in.'); return; }
     const stored = localStorage.getItem(LS_KEY);
-    if (!stored) { showOverlay(); return; }
+    if (!stored) { showOverlay('login'); return; }
     btnLogin.disabled = true;
     btnLogin.innerHTML = '<span class="spinner"></span> Bezig...';
     try {
       const { orgId, apiKey } = await decryptCredentials(stored, pw);
+      loginFailCount = 0;
+      loginLockedUntil = 0;
       hideOverlay(orgId, apiKey);
     } catch {
-      showAuthError('Onjuist wachtwoord. Probeer opnieuw.');
+      loginFailCount++;
+      // Exponential back-off: 5s, 10s, 20s, capped at 60s
+      const delay = Math.min(5000 * Math.pow(2, loginFailCount - 1), 60000);
+      loginLockedUntil = Date.now() + delay;
+      const secs = Math.ceil(delay / 1000);
+      showAuthError(`Onjuist wachtwoord. Wacht ${secs} seconden voor de volgende poging. (${loginFailCount} mislukte poging${loginFailCount > 1 ? 'en' : ''})`);
     }
     btnLogin.disabled = false;
     btnLogin.textContent = 'Inloggen';
@@ -884,10 +914,14 @@
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner"></span> Bezig...';
 
+    // FIX 5: use typed sentinel instead of fragile string match
+    let changeErrMsg = null;
     try {
-      // Verify current password by decrypting existing credentials
       const stored = localStorage.getItem(LS_KEY);
-      if (!stored) throw new Error('Geen opgeslagen gegevens gevonden.');
+      if (!stored) {
+        changeErrMsg = 'Geen opgeslagen gegevens gevonden.';
+        throw new Error('no_stored');
+      }
       const existing = await decryptCredentials(stored, currentPw);
 
       // Merge: use new values where provided, keep existing otherwise
@@ -901,11 +935,7 @@
       // Update live session
       hideOverlay(finalOrgId, finalApiKey);
     } catch (err) {
-      if (err.message.includes('opgeslagen')) {
-        showAuthError(err.message);
-      } else {
-        showAuthError('Verificatie mislukt. Controleer je huidige wachtwoord.');
-      }
+      showAuthError(changeErrMsg || 'Verificatie mislukt. Controleer je huidige wachtwoord.');
     }
 
     btn.disabled = false;
@@ -953,6 +983,11 @@
 
   function handleFile(file) {
     if (!file) return;
+    // FIX 7: reject suspiciously large files before reading into memory
+    if (file.size > 5_000_000) {
+      setStatus('status1', 'error', 'Bestand is te groot (max 5 MB). Controleer of je het juiste bestand hebt geselecteerd.');
+      return;
+    }
     const reader = new FileReader();
     reader.onload = e => {
       const text = e.target.result;
