@@ -15,7 +15,7 @@ When members pay by bank transfer, they're required to include a structured refe
 
 ## Usage
 
-1. Open `stamhoofd-betaling-sync.html` in your browser
+1. Open `index.html` in your browser
 2. **First visit:** enter your Organisation ID, API token, and choose a password — your credentials are encrypted and saved to `localStorage`
 3. **Subsequent visits:** enter just your password to unlock
 4. Drag and drop your KBC CSV export onto the upload area, or click to browse
@@ -37,10 +37,10 @@ To change your credentials or password, use the **✏ Change credentials** butto
 
 ## KBC CSV Export
 
-In KBC Online, go to **Accounts → Account statements → Export** and choose CSV format. The filename typically looks like:
+In KBC Touch, go to **Accounts → Account statements → Export** and choose CSV format. The filename typically looks like:
 
 ```
-export_BE96XXXXXXXXXXXX_YYYYMMDD_HHMM.csv
+export_BEXXXXXXXXXXXXXX_YYYYMMDD_HHMM.csv
 ```
 
 The tool handles semicolon-separated files with CR, LF, or CRLF line endings and an optional UTF-8 BOM. Files larger than 5 MB are rejected.
