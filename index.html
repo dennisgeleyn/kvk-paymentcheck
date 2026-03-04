@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stamhoofd Betalingen Sync</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500;600&display=swap');
+
+    :root {
+      --bg: #0f1117;
+      --surface: #181b24;
+      --surface2: #1f2333;
+      --border: #2a2f42;
+      --accent: #4f7cff;
+      --accent-soft: rgba(79,124,255,0.12);
+      --green: #3ecf8e;
+      --green-soft: rgba(62,207,142,0.12);
+      --yellow: #f7c948;
+      --yellow-soft: rgba(247,201,72,0.1);
+      --red: #ff5e5e;
+      --red-soft: rgba(255,94,94,0.1);
+      --text: #e2e6f0;
+      --muted: #6b7591;
+      --radius: 12px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Sans', sans-serif;
+      font-size: 15px;
+      min-height: 100vh;
+      padding: 32px 20px 60px;
+    }
+
+    header {
+      max-width: 820px;
+      margin: 0 auto 40px;
+    }
+
+    .logo {
+      font-family: 'DM Serif Display', serif;
+      font-size: 26px;
+      letter-spacing: -0.5px;
+      color: #fff;
+      margin-bottom: 6px;
+    }
+
+    .logo span { color: var(--accent); }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 300;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px 32px;
+      max-width: 820px;
+      margin: 0 auto 20px;
+    }
+
+    .card-title {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--muted);
+      margin-bottom: 20px;
+    }
+
+    .form-row {
+      display: flex;
+      gap: 14px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      flex: 1;
+      min-width: 220px;
+    }
+
+    label {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--muted);
+    }
+
+    input[type="text"], input[type="password"] {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      color: var(--text);
+      font-family: 'DM Sans', sans-serif;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s;
+      width: 100%;
+    }
+
+    input[type="text"]:focus, input[type="password"]:focus {
+      border-color: var(--accent);
+    }
+
+    input::placeholder { color: var(--muted); }
+
+    .drop-zone {
+      border: 2px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 36px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+      position: relative;
+    }
+
+    .drop-zone:hover, .drop-zone.drag-over {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+    }
+
+    .drop-zone input[type="file"] {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+      width: 100%;
+      height: 100%;
+    }
+
+    .drop-icon {
+      font-size: 30px;
+      margin-bottom: 10px;
+    }
+
+    .drop-label {
+      font-size: 15px;
+      font-weight: 500;
+      margin-bottom: 4px;
+    }
+
+    .drop-hint {
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .file-selected {
+      background: var(--accent-soft);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 11px 22px;
+      border-radius: 8px;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: all 0.15s;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .btn-primary:hover { background: #3d6cff; }
+    .btn-primary:disabled { background: var(--border); color: var(--muted); cursor: not-allowed; }
+
+    .btn-ghost {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+    }
+
+    .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+
+    .btn-confirm {
+      background: var(--green);
+      color: #0f1117;
+    }
+
+    .btn-confirm:hover { background: #32bf7e; }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 22px;
+      flex-wrap: wrap;
+    }
+
+    /* Status area */
+    .status-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 500;
+      margin-top: 18px;
+    }
+
+    .status-bar.info { background: var(--accent-soft); color: var(--accent); border: 1px solid rgba(79,124,255,0.2); }
+    .status-bar.success { background: var(--green-soft); color: var(--green); border: 1px solid rgba(62,207,142,0.2); }
+    .status-bar.warn { background: var(--yellow-soft); color: var(--yellow); border: 1px solid rgba(247,201,72,0.2); }
+    .status-bar.error { background: var(--red-soft); color: var(--red); border: 1px solid rgba(255,94,94,0.2); }
+
+    /* Table */
+    .table-wrap {
+      overflow-x: auto;
+      margin-top: 20px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13.5px;
+    }
+
+    thead th {
+      background: var(--surface2);
+      padding: 11px 16px;
+      text-align: left;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.7px;
+      font-weight: 600;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    tbody tr {
+      border-top: 1px solid var(--border);
+      transition: background 0.1s;
+    }
+
+    tbody tr:hover { background: var(--surface2); }
+
+    td {
+      padding: 11px 16px;
+      vertical-align: middle;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 9px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .badge-match { background: var(--green-soft); color: var(--green); }
+    .badge-nomatch { background: var(--yellow-soft); color: var(--yellow); }
+    .badge-paid { background: rgba(107,117,145,0.15); color: var(--muted); }
+
+    .ref {
+      font-family: monospace;
+      font-size: 13px;
+      color: var(--accent);
+      background: var(--accent-soft);
+      padding: 2px 7px;
+      border-radius: 5px;
+    }
+
+    .amount { font-variant-numeric: tabular-nums; font-weight: 500; }
+
+    .spinner {
+      width: 16px; height: 16px;
+      border: 2px solid rgba(255,255,255,0.2);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      display: inline-block;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .summary-row {
+      display: flex;
+      gap: 14px;
+      flex-wrap: wrap;
+      margin-top: 20px;
+    }
+
+    .summary-chip {
+      flex: 1;
+      min-width: 140px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px 20px;
+    }
+
+    .chip-val {
+      font-family: 'DM Serif Display', serif;
+      font-size: 28px;
+      line-height: 1.1;
+    }
+
+    .chip-label {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 3px;
+    }
+
+    .chip-green .chip-val { color: var(--green); }
+    .chip-yellow .chip-val { color: var(--yellow); }
+    .chip-accent .chip-val { color: var(--accent); }
+
+    #step2, #step3 { display: none; }
+
+    .divider {
+      height: 1px;
+      background: var(--border);
+      margin: 22px 0;
+    }
+
+    .small { font-size: 12px; color: var(--muted); }
+
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      cursor: pointer;
+      padding: 6px 0;
+    }
+
+    input[type="checkbox"] {
+      width: 15px; height: 15px;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Stamhoofd <span>×</span> KBC</div>
+  <div class="subtitle">Markeer bankoverschrijvingen automatisch als betaald in je webshop</div>
+</header>
+
+<!-- Step 1: Config + upload -->
+<div class="card" id="step1">
+  <div class="card-title">⚙ Instellingen</div>
+  <div class="form-row">
+    <div class="form-group">
+      <label>Verenigings-ID (subdomein)</label>
+      <input type="text" id="orgId" placeholder="634d549b-862e-4a5e-852d-3d4a9814e22d" />
+    </div>
+    <div class="form-group">
+      <label>API-sleutel</label>
+      <input type="password" id="apiKey" placeholder="Instellingen → Experimenten → API-keys" />
+    </div>
+  </div>
+  <div class="small" style="margin-bottom:20px">Vind je ID door in stamhoofd.app te kijken naar de URL of in de API-documentatie.</div>
+
+  <div class="divider"></div>
+  <div class="card-title">📂 KBC CSV-export</div>
+
+  <div class="drop-zone" id="dropZone">
+    <input type="file" id="fileInput" accept=".csv" />
+    <div class="drop-icon">📄</div>
+    <div class="drop-label" id="dropLabel">Sleep je CSV hier naartoe of klik om te bladeren</div>
+    <div class="drop-hint">KBC CSV-export met gestructureerde mededeling</div>
+  </div>
+
+  <div class="actions">
+    <button class="btn btn-primary" id="btnFetch" disabled>
+      <span>Betalingen ophalen &amp; matchen</span>
+    </button>
+  </div>
+  <div id="status1"></div>
+</div>
+
+<!-- Step 2: Results -->
+<div class="card" id="step2">
+  <div class="card-title">🔍 Gevonden overeenkomsten</div>
+
+  <div class="summary-row" id="summaryRow"></div>
+
+  <div class="table-wrap" id="tableWrap"></div>
+
+  <div class="actions">
+    <button class="btn btn-confirm" id="btnConfirm">
+      ✓ Markeer als betaald in Stamhoofd
+    </button>
+    <button class="btn btn-ghost" id="btnReset">Opnieuw beginnen</button>
+  </div>
+  <div id="status2"></div>
+</div>
+
+<!-- Step 3: Done -->
+<div class="card" id="step3">
+  <div style="text-align:center; padding: 20px 0;">
+    <div style="font-size:48px; margin-bottom:14px">✅</div>
+    <div style="font-family:'DM Serif Display',serif; font-size:22px; margin-bottom:8px">Klaar!</div>
+    <div style="color:var(--muted); font-size:14px" id="doneMsg"></div>
+    <div class="actions" style="justify-content:center; margin-top:24px">
+      <button class="btn btn-ghost" id="btnStartOver">Nieuwe sync uitvoeren</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ── State ──────────────────────────────────────────────────────────────────
+  let csvRows = [];
+  let openPayments = [];
+  let matches = []; // { payment, csvRow, structRef }
+
+  // ── DOM refs ───────────────────────────────────────────────────────────────
+  const orgIdEl   = document.getElementById('orgId');
+  const apiKeyEl  = document.getElementById('apiKey');
+  const fileInput = document.getElementById('fileInput');
+  const dropZone  = document.getElementById('dropZone');
+  const dropLabel = document.getElementById('dropLabel');
+  const btnFetch  = document.getElementById('btnFetch');
+  const btnConfirm= document.getElementById('btnConfirm');
+  const btnReset  = document.getElementById('btnReset');
+  const btnStartOver = document.getElementById('btnStartOver');
+
+  // ── Enable button when ready ───────────────────────────────────────────────
+  function checkReady() {
+    btnFetch.disabled = !(orgIdEl.value.trim() && apiKeyEl.value.trim() && csvRows.length > 0);
+  }
+  orgIdEl.addEventListener('input', checkReady);
+  apiKeyEl.addEventListener('input', checkReady);
+
+  // ── File handling ──────────────────────────────────────────────────────────
+  fileInput.addEventListener('change', e => handleFile(e.target.files[0]));
+
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    handleFile(e.dataTransfer.files[0]);
+  });
+
+  function handleFile(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = e => {
+      const text = e.target.result;
+      csvRows = parseKBCcsv(text);
+      if (csvRows.length === 0) {
+        setStatus('status1', 'error', '⚠ Geen geldige KBC-transacties gevonden in dit bestand.');
+        return;
+      }
+      dropLabel.textContent = `✓ ${file.name} (${csvRows.length} transacties geladen)`;
+      dropZone.classList.add('file-selected');
+      setStatus('status1', 'info', `${csvRows.length} transacties ingelezen. Vul je API-sleutel in en klik op "Betalingen ophalen".`);
+      checkReady();
+    };
+    reader.readAsText(file, 'UTF-8');
+  }
+
+  // ── KBC CSV parser ─────────────────────────────────────────────────────────
+  // KBC CSV uses semicolons: Rekeningnummer;...;gestructureerde mededeling;Vrije mededeling
+  function parseKBCcsv(text) {
+    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1); // strip UTF-8 BOM
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length < 2) return [];
+
+    // Detect separator (semicolon or comma)
+    const sep = lines[0].includes(';') ? ';' : ',';
+    const headers = lines[0].split(sep).map(h => h.replace(/^"|"$/g, '').trim().toLowerCase());
+
+    // Find relevant column indices
+    const colRef  = findCol(headers, ['gestructureerde mededeling', 'structured communication', 'mededeling', 'ref']);
+    const colFree = findCol(headers, ['vrije mededeling', 'free communication', 'omschrijving', 'description']);
+    const colAmt  = findCol(headers, ['bedrag', 'amount', 'credit']);
+    const colDate = findCol(headers, ['datum', 'date', 'valuta']);
+    const colName = findCol(headers, ['naam tegenpartij', 'naam', 'name', 'counterparty name']);
+
+    const rows = [];
+    for (let i = 1; i < lines.length; i++) {
+      const cells = splitCSVLine(lines[i], sep);
+      const raw = (colRef >= 0 ? cells[colRef] : '') || '';
+      const ref = normalizeRef(raw);
+      if (!ref && !cells[colFree]) continue;
+      rows.push({
+        structRef: ref,
+        freeRef: cells[colFree] || '',
+        amount: cells[colAmt] || '',
+        date: cells[colDate] || '',
+        name: colName >= 0 ? cells[colName] || '' : '',
+        raw: lines[i],
+      });
+    }
+    return rows;
+  }
+
+  function findCol(headers, candidates) {
+    for (const c of candidates) {
+      const idx = headers.findIndex(h => h.includes(c));
+      if (idx >= 0) return idx;
+    }
+    return -1;
+  }
+
+  function splitCSVLine(line, sep) {
+    const result = [];
+    let cur = '', inQ = false;
+    for (const ch of line) {
+      if (ch === '"') { inQ = !inQ; }
+      else if (ch === sep && !inQ) { result.push(cur.trim()); cur = ''; }
+      else { cur += ch; }
+    }
+    result.push(cur.trim());
+    return result;
+  }
+
+  // Normalize: keep only digits, then format as +++xxx/xxxx/xxxxx+++
+  function normalizeRef(raw) {
+    if (!raw) return '';
+    // Remove all non-digits
+    const digits = raw.replace(/\D/g, '');
+    if (digits.length !== 12) return '';
+    // Reconstruct +++ddd/dddd/ddddd+++
+    return `+++${digits.slice(0,3)}/${digits.slice(3,7)}/${digits.slice(7)}+++`;
+  }
+
+  // ── Fetch Stamhoofd open payments ──────────────────────────────────────────
+  btnFetch.addEventListener('click', async () => {
+    const orgId = orgIdEl.value.trim();
+    const apiKey = apiKeyEl.value.trim();
+    if (!orgId || !apiKey) return;
+
+    btnFetch.innerHTML = '<span class="spinner"></span> Bezig...';
+    btnFetch.disabled = true;
+    setStatus('status1', 'info', 'Openstaande betalingen ophalen uit Stamhoofd...');
+
+    try {
+      if (!/^[0-9a-f-]{36}$/i.test(orgId)) throw new Error('Ongeldig verenigings-ID. Gebruik de UUID uit je Stamhoofd-instellingen.');
+      const url = `https://${orgId}.api.stamhoofd.app/v191/organization/payments`;
+      const resp = await fetch(url, {
+        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
+      });
+
+      if (!resp.ok) throw new Error(`API-fout ${resp.status}. Controleer je verenigings-ID en API-sleutel.`);
+      openPayments = await resp.json();
+
+      // Only bank transfers that are not yet paid
+      const pending = openPayments.filter(p => p.method === 'Transfer' && p.status !== 'Succeeded');
+
+      if (pending.length === 0) {
+        setStatus('status1', 'warn', 'Geen openstaande bankoverschrijvingen gevonden in Stamhoofd.');
+        btnFetch.innerHTML = 'Betalingen ophalen & matchen';
+        btnFetch.disabled = false;
+        return;
+      }
+
+      // Match — track used CSV refs to avoid double-marking same transfer
+      matches = [];
+      const usedCsvRefs = new Set();
+      for (const payment of pending) {
+        const pRef = normalizeRef(payment.transferDescription || '');
+        const csvRow = csvRows.find(row => row.structRef && row.structRef === pRef && !usedCsvRefs.has(pRef));
+        if (csvRow && pRef) usedCsvRefs.add(pRef);
+        matches.push({ payment, csvRow: csvRow || null, structRef: pRef });
+      }
+
+      showResults(matches);
+      document.getElementById('step2').style.display = 'block';
+      document.getElementById('step2').scrollIntoView({ behavior: 'smooth' });
+      setStatus('status1', 'success', `${pending.length} openstaande betalingen opgehaald.`);
+
+    } catch (err) {
+      setStatus('status1', 'error', `Fout: ${err.message}`);
+    }
+
+    btnFetch.innerHTML = 'Betalingen ophalen &amp; matchen';
+    btnFetch.disabled = false;
+  });
+
+  // ── Show results table ─────────────────────────────────────────────────────
+  function showResults(matches) {
+    const matched = matches.filter(m => m.csvRow);
+    const unmatched = matches.filter(m => !m.csvRow);
+
+    // Summary chips — only numbers, safe
+    document.getElementById('summaryRow').innerHTML =
+      `<div class="summary-chip chip-green"><div class="chip-val">${matched.length}</div><div class="chip-label">Gevonden in CSV</div></div>` +
+      `<div class="summary-chip chip-yellow"><div class="chip-val">${unmatched.length}</div><div class="chip-label">Nog niet betaald</div></div>` +
+      `<div class="summary-chip chip-accent"><div class="chip-val">${matches.length}</div><div class="chip-label">Totaal openstaand</div></div>`;
+
+    // Build table using DOM API to prevent XSS from API/CSV data
+    const tbody = document.createElement('tbody');
+    for (const m of matches) {
+      const customer = m.payment.balanceItemPayments?.[0]?.balanceItem?.order?.data?.customer;
+      const name = customer ? `${customer.firstName} ${customer.lastName}` : '—';
+      const amountCents = typeof m.payment.price === 'number' ? m.payment.price : 0;
+      const amount = (amountCents / 100).toFixed(2).replace('.', ',') + ' €';
+      const structRef = m.structRef || m.payment.transferDescription || '—';
+      const csvDate = m.csvRow ? m.csvRow.date : '—';
+      // Only accept well-formed UUIDs to prevent injection via data-id
+      const safeId = /^[0-9a-f-]{36}$/i.test(m.payment.id || '') ? m.payment.id : '';
+
+      const tr = document.createElement('tr');
+
+      const tdCb = document.createElement('td');
+      const lbl = document.createElement('label');
+      lbl.className = 'checkbox-row';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.className = 'match-cb';
+      cb.dataset.id = safeId;
+      cb.checked = !!(m.csvRow && safeId);
+      cb.disabled = !(m.csvRow && safeId);
+      lbl.appendChild(cb); tdCb.appendChild(lbl);
+
+      const tdName = document.createElement('td');
+      tdName.textContent = name;
+
+      const tdRef = document.createElement('td');
+      const refSpan = document.createElement('span');
+      refSpan.className = 'ref'; refSpan.textContent = structRef;
+      tdRef.appendChild(refSpan);
+
+      const tdAmt = document.createElement('td');
+      tdAmt.className = 'amount'; tdAmt.textContent = amount;
+
+      const tdBadge = document.createElement('td');
+      const badge = document.createElement('span');
+      badge.className = `badge ${m.csvRow ? 'badge-match' : 'badge-nomatch'}`;
+      badge.textContent = m.csvRow ? '✓ Betaald' : '⏳ Niet gevonden';
+      tdBadge.appendChild(badge);
+
+      const tdDate = document.createElement('td');
+      const dateSpan = document.createElement('span');
+      dateSpan.className = 'small'; dateSpan.textContent = csvDate;
+      tdDate.appendChild(dateSpan);
+
+      tr.append(tdCb, tdName, tdRef, tdAmt, tdBadge, tdDate);
+      tbody.appendChild(tr);
+    }
+
+    const table = document.createElement('table');
+    table.innerHTML = '<thead><tr><th></th><th>Klant</th><th>Referentie</th><th>Bedrag</th><th>Status in CSV</th><th>Betaaldatum</th></tr></thead>';
+    table.appendChild(tbody);
+    const wrap = document.getElementById('tableWrap');
+    wrap.innerHTML = ''; wrap.appendChild(table);
+
+    if (matched.length === 0) {
+      setStatus('status2', 'warn', 'Geen overeenkomsten gevonden. Controleer of de referentienummers kloppen.');
+      btnConfirm.disabled = true;
+    } else {
+      setStatus('status2', 'info', `${matched.length} betaling(en) klaar om als betaald te markeren. Controleer de selectie en klik op bevestigen.`);
+      btnConfirm.disabled = false;
+    }
+  }
+
+    // ── Confirm: mark as paid ──────────────────────────────────────────────────
+  let confirmInProgress = false;
+  btnConfirm.addEventListener('click', async () => {
+    if (confirmInProgress) return;
+    confirmInProgress = true;
+    const orgId = orgIdEl.value.trim();
+    const apiKey = apiKeyEl.value.trim();
+
+    // Collect checked payment IDs
+    const checkedIds = [...document.querySelectorAll('.match-cb:checked')].map(cb => cb.dataset.id);
+    if (checkedIds.length === 0) {
+      setStatus('status2', 'warn', 'Geen betalingen geselecteerd.');
+      return;
+    }
+
+    btnConfirm.innerHTML = '<span class="spinner"></span> Bezig met markeren...';
+    btnConfirm.disabled = true;
+
+    const changes = checkedIds.map(id => ({
+      patch: { status: 'Succeeded', id, _isPatch: true }
+    }));
+
+    try {
+      if (!/^[0-9a-f-]{36}$/i.test(orgId)) throw new Error('Ongeldig verenigings-ID.');
+      const url = `https://${orgId}.api.stamhoofd.app/v191/organization/payments`;
+      const resp = await fetch(url, {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ _isPatch: true, changes })
+      });
+
+      if (!resp.ok) throw new Error(`API-fout ${resp.status} bij opslaan. Controleer je instellingen.`);
+
+      document.getElementById('step2').style.display = 'none';
+      document.getElementById('step3').style.display = 'block';
+      document.getElementById('doneMsg').textContent = `${checkedIds.length} betaling(en) zijn gemarkeerd als betaald in Stamhoofd.`;
+      document.getElementById('step3').scrollIntoView({ behavior: 'smooth' });
+
+    } catch (err) {
+      setStatus('status2', 'error', `Fout bij opslaan: ${err.message}`);
+      btnConfirm.innerHTML = '✓ Markeer als betaald in Stamhoofd';
+      btnConfirm.disabled = false;
+    }
+    confirmInProgress = false;
+  });
+
+  // ── Reset ──────────────────────────────────────────────────────────────────
+  function doReset() {
+    csvRows = []; openPayments = []; matches = [];
+    fileInput.value = '';
+    dropLabel.textContent = 'Sleep je CSV hier naartoe of klik om te bladeren';
+    dropZone.classList.remove('file-selected');
+    document.getElementById('step2').style.display = 'none';
+    document.getElementById('step3').style.display = 'none';
+    document.getElementById('status1').innerHTML = '';
+    document.getElementById('status2').innerHTML = '';
+    btnFetch.disabled = true;
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  btnReset.addEventListener('click', doReset);
+  btnStartOver.addEventListener('click', doReset);
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  function setStatus(id, type, msg) {
+    const icons = { info: 'ℹ', success: '✓', warn: '⚠', error: '✕' };
+    const div = document.createElement('div');
+    div.className = `status-bar ${type}`;
+    div.textContent = `${icons[type]} ${msg}`;
+    const container = document.getElementById(id);
+    container.innerHTML = '';
+    container.appendChild(div);
+  }
+</script>
+</body>
+</html>
