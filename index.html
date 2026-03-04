@@ -480,6 +480,8 @@
   // KBC CSV uses semicolons: Rekeningnummer;...;gestructureerde mededeling;Vrije mededeling
   function parseKBCcsv(text) {
     if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1); // strip UTF-8 BOM
+    // KBC uses CR-only line endings; normalise to \n before splitting
+    text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
     const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
     if (lines.length < 2) return [];
 
