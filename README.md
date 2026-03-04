@@ -15,7 +15,7 @@ When members pay by bank transfer, they're required to include a structured refe
 
 ## Usage
 
-1. Open `index.html` in your browser
+1. Open `stamhoofd-betaling-sync.html` in your browser
 2. **First visit:** enter your Organisation ID, API token, and choose a password — your credentials are encrypted and saved to `localStorage`
 3. **Subsequent visits:** enter just your password to unlock
 4. Drag and drop your KBC CSV export onto the upload area, or click to browse
@@ -37,10 +37,10 @@ To change your credentials or password, use the **✏ Change credentials** butto
 
 ## KBC CSV Export
 
-In KBC Touch, export the transactions from your bank account in CSV format. The filename typically looks like:
+In KBC Online, go to **Accounts → Account statements → Export** and choose CSV format. The filename typically looks like:
 
 ```
-export_BEXXXXXXXXXXXXXX_YYYYMMDD_HHMM.csv
+export_BE96XXXXXXXXXXXX_YYYYMMDD_HHMM.csv
 ```
 
 The tool handles semicolon-separated files with CR, LF, or CRLF line endings and an optional UTF-8 BOM. Files larger than 5 MB are rejected.
@@ -54,13 +54,14 @@ The tool uses two endpoints:
 | `GET` | `/v191/organization/payments` | Fetch open transfer payments |
 | `PATCH` | `/v191/organization/payments/:id` | Mark a payment as succeeded |
 
-An API token can be created via **Stamhoofd → Settings → Experiments → API keys**.
+An API token can be created via **Stamhoofd → Settings → API access**.
 
 ## Security Notes
 
 - No data is sent to any external server — all requests go directly from your browser to the Stamhoofd API
 - Structured references are normalised (digits only) before comparison to handle formatting differences
 - Each reference can only be matched once per session to prevent duplicate marking
+- Unmatched payments can be manually overridden — clicking the disabled checkbox reveals an inline warning requiring explicit confirmation before the payment can be selected
 - Payment IDs are validated as UUIDs before being sent to the API
 - The tool locks immediately if the browser tab is hidden (e.g. switching apps)
 
@@ -69,7 +70,7 @@ An API token can be created via **Stamhoofd → Settings → Experiments → API
 - Pure HTML/CSS/JS — no frameworks, no build step, no dependencies
 - Crypto via the browser's native [Web Crypto API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Crypto_API) — no third-party crypto libraries
 - Compatible with KBC CSV exports (semicolon-separated, CR line endings, UTF-8)
-- Matches on structured reference (`+++xxx/xxxx/xxxxx+++`) from the `gestructureerde mededeling` column
+- Matches on structured reference (`+++ddd/dddd/ddddd+++`) from the `gestructureerde mededeling` column
 - Falls back to `Vrije mededeling` and `Omschrijving` columns when no structured reference is present
 
 ## License
