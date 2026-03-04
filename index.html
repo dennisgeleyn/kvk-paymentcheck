@@ -456,6 +456,38 @@
 
     .btn-lock:hover { border-color: var(--red); color: var(--red); }
 
+    .override-warn {
+      font-size: 12px;
+      color: var(--yellow);
+      background: var(--yellow-soft);
+      border: 1px solid rgba(247,201,72,0.25);
+      border-radius: 6px;
+      padding: 6px 10px;
+      margin-top: 5px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-override {
+      background: transparent;
+      border: 1px solid rgba(247,201,72,0.5);
+      color: var(--yellow);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-family: 'DM Sans', sans-serif;
+      white-space: nowrap;
+      flex-shrink: 0;
+      transition: all 0.15s;
+    }
+
+    .btn-override:hover {
+      background: var(--yellow-soft);
+    }
+
     .lock-timer {
       font-size: 11px;
       color: var(--muted);
@@ -1158,7 +1190,37 @@
       cb.dataset.id = safeId;
       cb.checked = !!(m.csvRow && safeId);
       cb.disabled = !(m.csvRow && safeId);
-      lbl.appendChild(cb); tdCb.appendChild(lbl);
+      lbl.appendChild(cb);
+
+      // Override UI for unmatched rows
+      if (!m.csvRow && safeId) {
+        const warn = document.createElement('div');
+        warn.className = 'override-warn';
+        warn.style.display = 'none';
+        const warnText = document.createElement('span');
+        warnText.textContent = 'Niet gevonden in CSV — weet je zeker dat je dit handmatig wilt markeren?';
+        const overrideBtn = document.createElement('button');
+        overrideBtn.className = 'btn-override';
+        overrideBtn.textContent = 'Toch markeren';
+        overrideBtn.addEventListener('click', () => {
+          cb.disabled = false;
+          cb.checked = true;
+          warn.style.display = 'none';
+        });
+        warn.appendChild(warnText);
+        warn.appendChild(overrideBtn);
+
+        // Show warning on click of disabled checkbox area
+        lbl.addEventListener('click', (e) => {
+          if (cb.disabled) {
+            e.preventDefault();
+            warn.style.display = warn.style.display === 'none' ? 'flex' : 'none';
+          }
+        });
+        tdCb.appendChild(warn);
+      }
+
+      tdCb.appendChild(lbl);
 
       const tdName = document.createElement('td');
       tdName.textContent = name;
