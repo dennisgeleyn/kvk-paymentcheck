@@ -1183,16 +1183,14 @@
       const tr = document.createElement('tr');
 
       const tdCb = document.createElement('td');
-      const lbl = document.createElement('label');
-      lbl.className = 'checkbox-row';
+      tdCb.style.verticalAlign = 'middle';
       const cb = document.createElement('input');
       cb.type = 'checkbox'; cb.className = 'match-cb';
       cb.dataset.id = safeId;
       cb.checked = !!(m.csvRow && safeId);
       cb.disabled = !(m.csvRow && safeId);
-      lbl.appendChild(cb);
-
-      tdCb.appendChild(lbl);
+      cb.style.cursor = cb.disabled ? 'pointer' : 'pointer';
+      tdCb.appendChild(cb);
 
       // Override UI for unmatched rows — appended after lbl so it renders below
       if (!m.csvRow && safeId) {
