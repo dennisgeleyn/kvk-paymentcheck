@@ -1210,9 +1210,11 @@
         warn.appendChild(warnText);
         warn.appendChild(overrideBtn);
 
-        // Show warning on click of disabled checkbox area
-        lbl.addEventListener('click', (e) => {
-          if (cb.disabled) {
+        // Show warning when clicking anywhere in the cell while checkbox is disabled.
+        // Listen on tdCb (not lbl) to avoid the browser's label→checkbox focus
+        // behaviour swallowing the event before our handler runs.
+        tdCb.addEventListener('click', (e) => {
+          if (cb.disabled && !e.target.classList.contains('btn-override')) {
             e.preventDefault();
             warn.style.display = warn.style.display === 'none' ? 'flex' : 'none';
           }
