@@ -37,7 +37,7 @@ To change your credentials or password, use the **✏ Change credentials** butto
 
 ## KBC CSV Export
 
-In KBC Touch, go to **Accounts → Account statements → Export** and choose CSV format. The filename typically looks like:
+In KBC Touch, export the transactions from your bank account in CSV format. The filename typically looks like:
 
 ```
 export_BEXXXXXXXXXXXXXX_YYYYMMDD_HHMM.csv
@@ -54,7 +54,7 @@ The tool uses two endpoints:
 | `GET` | `/v191/organization/payments` | Fetch open transfer payments |
 | `PATCH` | `/v191/organization/payments/:id` | Mark a payment as succeeded |
 
-An API token can be created via **Stamhoofd → Settings → API access**.
+An API token can be created via **Stamhoofd → Settings → Experiments → API keys**.
 
 ## Security Notes
 
@@ -69,7 +69,7 @@ An API token can be created via **Stamhoofd → Settings → API access**.
 - Pure HTML/CSS/JS — no frameworks, no build step, no dependencies
 - Crypto via the browser's native [Web Crypto API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Crypto_API) — no third-party crypto libraries
 - Compatible with KBC CSV exports (semicolon-separated, CR line endings, UTF-8)
-- Matches on structured reference (`+++ddd/dddd/ddddd+++`) from the `gestructureerde mededeling` column
+- Matches on structured reference (`+++xxx/xxxx/xxxxx+++`) from the `gestructureerde mededeling` column
 - Falls back to `Vrije mededeling` and `Omschrijving` columns when no structured reference is present
 
 ## License
