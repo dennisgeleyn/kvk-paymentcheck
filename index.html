@@ -352,31 +352,222 @@
       accent-color: var(--accent);
       cursor: pointer;
     }
+
+    /* ── Auth overlay ─────────────────────────────────────────────────────── */
+    #authOverlay {
+      position: fixed;
+      inset: 0;
+      background: var(--bg);
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .auth-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 40px 36px;
+      width: 100%;
+      max-width: 420px;
+    }
+
+    .auth-logo {
+      font-family: 'DM Serif Display', serif;
+      font-size: 22px;
+      color: #fff;
+      margin-bottom: 6px;
+    }
+
+    .auth-logo span { color: var(--accent); }
+
+    .auth-sub {
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 28px;
+    }
+
+    .auth-section-label {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--muted);
+      margin-bottom: 20px;
+    }
+
+    .auth-field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 14px;
+    }
+
+    .auth-field label { font-size: 13px; font-weight: 500; color: var(--muted); }
+
+    .auth-hint {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 4px;
+      line-height: 1.5;
+    }
+
+    .auth-error {
+      background: var(--red-soft);
+      color: var(--red);
+      border: 1px solid rgba(255,94,94,0.2);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 13px;
+      margin-bottom: 14px;
+      display: none;
+    }
+
+    .auth-divider {
+      height: 1px;
+      background: var(--border);
+      margin: 20px 0;
+    }
+
+    /* Lock button in header */
+    .header-row {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .btn-lock {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 12px;
+      padding: 6px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-family: 'DM Sans', sans-serif;
+      font-weight: 500;
+      white-space: nowrap;
+      flex-shrink: 0;
+      transition: all 0.15s;
+    }
+
+    .btn-lock:hover { border-color: var(--red); color: var(--red); }
+
+    .lock-timer {
+      font-size: 11px;
+      color: var(--muted);
+      text-align: right;
+      margin-top: 3px;
+    }
   </style>
 </head>
 <body>
 
+<!-- Auth Overlay -->
+<div id="authOverlay">
+  <div class="auth-box">
+    <div class="auth-logo">Stamhoofd <span>×</span> KBC</div>
+    <div class="auth-sub">Markeer bankoverschrijvingen automatisch als betaald</div>
+
+    <div id="authError" class="auth-error"></div>
+
+    <!-- Login view (shown when credentials exist) -->
+    <div id="viewLogin">
+      <div class="auth-section-label">🔒 Inloggen</div>
+      <div class="auth-field">
+        <label for="loginPassword">Wachtwoord</label>
+        <input type="password" id="loginPassword" placeholder="Voer je wachtwoord in" autocomplete="current-password" />
+      </div>
+      <div class="actions" style="margin-top:18px">
+        <button class="btn btn-primary" id="btnLogin" style="width:100%;justify-content:center">Inloggen</button>
+      </div>
+      <div class="auth-divider"></div>
+      <div class="auth-hint">Vergeten? <a href="#" id="linkReset" style="color:var(--accent)">Klik hier om opnieuw in te stellen</a> (wist opgeslagen gegevens).</div>
+      <div class="auth-hint" style="margin-top:6px">Ingelogd? <a href="#" id="linkChangeWhileLocked" style="color:var(--accent)">Gegevens wijzigen</a> (vereist huidig wachtwoord).</div>
+    </div>
+
+    <!-- Change credentials view (shown when user wants to update stored data) -->
+    <div id="viewChange" style="display:none">
+      <div class="auth-section-label">✏ Gegevens wijzigen</div>
+      <div class="auth-field">
+        <label for="changeCurrentPw">Huidig wachtwoord</label>
+        <input type="password" id="changeCurrentPw" placeholder="Ter verificatie" autocomplete="current-password" />
+      </div>
+      <div class="auth-divider"></div>
+      <div class="auth-field">
+        <label for="changeOrgId">Verenigings-ID (UUID)</label>
+        <input type="text" id="changeOrgId" placeholder="Laat leeg om niet te wijzigen" autocomplete="off" />
+      </div>
+      <div class="auth-field">
+        <label for="changeApiKey">API-sleutel</label>
+        <input type="password" id="changeApiKey" placeholder="Laat leeg om niet te wijzigen" autocomplete="off" />
+      </div>
+      <div class="auth-divider"></div>
+      <div class="auth-field">
+        <label for="changeNewPw">Nieuw wachtwoord</label>
+        <input type="password" id="changeNewPw" placeholder="Laat leeg om huidig te behouden" autocomplete="new-password" />
+      </div>
+      <div class="auth-field">
+        <label for="changeNewPw2">Bevestig nieuw wachtwoord</label>
+        <input type="password" id="changeNewPw2" placeholder="Herhaal nieuw wachtwoord" autocomplete="new-password" />
+      </div>
+      <div class="actions" style="margin-top:18px; gap:8px">
+        <button class="btn btn-primary" id="btnChange" style="flex:1;justify-content:center">Opslaan</button>
+        <button class="btn btn-ghost" id="btnCancelChange" style="justify-content:center">Annuleren</button>
+      </div>
+    </div>
+
+    <!-- Setup view (shown on first use or after reset) -->
+    <div id="viewSetup" style="display:none">
+      <div class="auth-section-label">⚙ Eerste instelling</div>
+      <div class="auth-field">
+        <label for="setupOrgId">Verenigings-ID (UUID)</label>
+        <input type="text" id="setupOrgId" placeholder="634d549b-862e-4a5e-852d-3d4a9814e22d" autocomplete="off" />
+      </div>
+      <div class="auth-field">
+        <label for="setupApiKey">API-sleutel</label>
+        <input type="password" id="setupApiKey" placeholder="Instellingen → Experimenten → API-keys" autocomplete="off" />
+      </div>
+      <div class="auth-divider"></div>
+      <div class="auth-field">
+        <label for="setupPassword">Kies een wachtwoord</label>
+        <input type="password" id="setupPassword" placeholder="Minimaal 8 tekens" autocomplete="new-password" />
+        <div class="auth-hint">Je gegevens worden versleuteld opgeslagen met dit wachtwoord. Het wachtwoord zelf wordt nergens bewaard.</div>
+      </div>
+      <div class="auth-field">
+        <label for="setupPassword2">Bevestig wachtwoord</label>
+        <input type="password" id="setupPassword2" placeholder="Herhaal wachtwoord" autocomplete="new-password" />
+      </div>
+      <div class="actions" style="margin-top:18px">
+        <button class="btn btn-primary" id="btnSetup" style="width:100%;justify-content:center">Opslaan &amp; inloggen</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <header>
-  <div class="logo">Stamhoofd <span>×</span> KBC</div>
-  <div class="subtitle">Markeer bankoverschrijvingen automatisch als betaald in je webshop</div>
+  <div class="header-row">
+    <div>
+      <div class="logo">Stamhoofd <span>×</span> KBC</div>
+      <div class="subtitle">Markeer bankoverschrijvingen automatisch als betaald in je webshop</div>
+    </div>
+    <div>
+      <button class="btn-lock" id="btnChangeCreds" style="margin-bottom:4px">✏ Gegevens wijzigen</button><br>
+      <button class="btn-lock" id="btnLock">🔒 Vergrendelen</button>
+      <div class="lock-timer" id="lockTimer"></div>
+    </div>
+  </div>
 </header>
 
 <!-- Step 1: Config + upload -->
 <div class="card" id="step1">
-  <div class="card-title">⚙ Instellingen</div>
-  <div class="form-row">
-    <div class="form-group">
-      <label>Verenigings-ID (subdomein)</label>
-      <input type="text" id="orgId" placeholder="634d549b-862e-4a5e-852d-3d4a9814e22d" />
-    </div>
-    <div class="form-group">
-      <label>API-sleutel</label>
-      <input type="password" id="apiKey" placeholder="Instellingen → Experimenten → API-keys" />
-    </div>
-  </div>
-  <div class="small" style="margin-bottom:20px">Vind je ID door in stamhoofd.app te kijken naar de URL of in de API-documentatie.</div>
+  <!-- Hidden inputs populated by auth system; never shown to user -->
+  <input type="text" id="orgId" style="display:none" aria-hidden="true" />
+  <input type="password" id="apiKey" style="display:none" aria-hidden="true" />
 
-  <div class="divider"></div>
   <div class="card-title">📂 KBC CSV-export</div>
 
   <div class="drop-zone" id="dropZone">
@@ -424,6 +615,310 @@
 </div>
 
 <script>
+  // ══════════════════════════════════════════════════════════════════════════
+  // CRYPTO + AUTH
+  // Uses Web Crypto API (AES-256-GCM) to encrypt credentials with the user's
+  // password. The password is never stored; only the ciphertext lives in
+  // localStorage. Plain-text credentials exist only in memory during a session.
+  // ══════════════════════════════════════════════════════════════════════════
+
+  const LS_KEY = 'stamhoofd_enc_creds_v1';
+  const AUTO_LOCK_MS = 30 * 60 * 1000; // 30 minutes
+
+  // In-memory session credentials (never persisted in plain text)
+  let sessionOrgId = '';
+  let sessionApiKey = '';
+  let lockTimer = null;
+  let lockCountdownInterval = null;
+  let lockAt = null;
+
+  // ── Crypto helpers ─────────────────────────────────────────────────────────
+
+  async function deriveKey(password, salt) {
+    const enc = new TextEncoder();
+    const keyMaterial = await crypto.subtle.importKey(
+      'raw', enc.encode(password), { name: 'PBKDF2' }, false, ['deriveKey']
+    );
+    return crypto.subtle.deriveKey(
+      { name: 'PBKDF2', salt, iterations: 310000, hash: 'SHA-256' },
+      keyMaterial,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt']
+    );
+  }
+
+  async function encryptCredentials(orgId, apiKey, password) {
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const iv   = crypto.getRandomValues(new Uint8Array(12));
+    const key  = await deriveKey(password, salt);
+    const plain = new TextEncoder().encode(JSON.stringify({ orgId, apiKey }));
+    const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, plain);
+    // Pack: salt(16) + iv(12) + ciphertext → base64
+    const buf = new Uint8Array(16 + 12 + cipher.byteLength);
+    buf.set(salt, 0); buf.set(iv, 16); buf.set(new Uint8Array(cipher), 28);
+    return btoa(String.fromCharCode(...buf));
+  }
+
+  async function decryptCredentials(b64, password) {
+    const buf  = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    const salt = buf.slice(0, 16);
+    const iv   = buf.slice(16, 28);
+    const data = buf.slice(28);
+    const key  = await deriveKey(password, salt);
+    const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, data);
+    return JSON.parse(new TextDecoder().decode(plain));
+  }
+
+  // ── Auth UI logic ──────────────────────────────────────────────────────────
+
+  const authOverlay   = document.getElementById('authOverlay');
+  const viewLogin     = document.getElementById('viewLogin');
+  const viewSetup     = document.getElementById('viewSetup');
+  const viewChange    = document.getElementById('viewChange');
+  const authError     = document.getElementById('authError');
+  const btnLogin      = document.getElementById('btnLogin');
+  const btnSetup      = document.getElementById('btnSetup');
+  const btnLock       = document.getElementById('btnLock');
+  const btnChangeCreds= document.getElementById('btnChangeCreds');
+  const linkReset     = document.getElementById('linkReset');
+  const linkChangeWhileLocked = document.getElementById('linkChangeWhileLocked');
+
+  function showAuthError(msg) {
+    authError.textContent = msg;
+    authError.style.display = 'block';
+  }
+
+  function clearAuthError() {
+    authError.style.display = 'none';
+    authError.textContent = '';
+  }
+
+  function showView(name) {
+    viewLogin.style.display  = name === 'login'  ? 'block' : 'none';
+    viewSetup.style.display  = name === 'setup'  ? 'block' : 'none';
+    viewChange.style.display = name === 'change' ? 'block' : 'none';
+  }
+
+  function showOverlay(view) {
+    clearAuthError();
+    authOverlay.style.display = 'flex';
+    const hasStored = !!localStorage.getItem(LS_KEY);
+    if (view === 'change' && hasStored) {
+      showView('change');
+      // Pre-fill org/key from session if available
+      document.getElementById('changeOrgId').value = sessionOrgId || '';
+      document.getElementById('changeApiKey').value = '';
+      document.getElementById('changeCurrentPw').value = '';
+      document.getElementById('changeNewPw').value = '';
+      document.getElementById('changeNewPw2').value = '';
+      setTimeout(() => document.getElementById('changeCurrentPw').focus(), 50);
+    } else if (hasStored) {
+      showView('login');
+      document.getElementById('loginPassword').value = '';
+      setTimeout(() => document.getElementById('loginPassword').focus(), 50);
+    } else {
+      showView('setup');
+      setTimeout(() => document.getElementById('setupOrgId').focus(), 50);
+    }
+  }
+
+  function hideOverlay(orgId, apiKey) {
+    sessionOrgId = orgId;
+    sessionApiKey = apiKey;
+    // Populate hidden inputs used by fetch/confirm
+    document.getElementById('orgId').value = orgId;
+    document.getElementById('apiKey').value = apiKey;
+    authOverlay.style.display = 'none';
+    startAutoLock();
+    checkReady();
+  }
+
+  function lock() {
+    sessionOrgId = ''; sessionApiKey = '';
+    document.getElementById('orgId').value = '';
+    document.getElementById('apiKey').value = '';
+    clearAutoLock();
+    showOverlay('login');
+  }
+
+  // ── Auto-lock ──────────────────────────────────────────────────────────────
+
+  function startAutoLock() {
+    clearAutoLock();
+    lockAt = Date.now() + AUTO_LOCK_MS;
+    lockTimer = setTimeout(lock, AUTO_LOCK_MS);
+    updateLockCountdown();
+    lockCountdownInterval = setInterval(updateLockCountdown, 30000);
+  }
+
+  function clearAutoLock() {
+    clearTimeout(lockTimer);
+    clearInterval(lockCountdownInterval);
+    lockTimer = lockCountdownInterval = null;
+    lockAt = null;
+    document.getElementById('lockTimer').textContent = '';
+  }
+
+  function resetAutoLock() {
+    if (lockAt !== null) startAutoLock();
+  }
+
+  function updateLockCountdown() {
+    if (!lockAt) return;
+    const mins = Math.max(0, Math.ceil((lockAt - Date.now()) / 60000));
+    document.getElementById('lockTimer').textContent = `Auto-lock over ${mins} min`;
+  }
+
+  // Reset inactivity timer on user interaction
+  document.addEventListener('click', resetAutoLock);
+  document.addEventListener('keydown', resetAutoLock);
+
+  // ── Login handler ──────────────────────────────────────────────────────────
+
+  btnLogin.addEventListener('click', async () => {
+    clearAuthError();
+    const pw = document.getElementById('loginPassword').value;
+    if (!pw) { showAuthError('Voer je wachtwoord in.'); return; }
+    const stored = localStorage.getItem(LS_KEY);
+    if (!stored) { showOverlay(); return; }
+    btnLogin.disabled = true;
+    btnLogin.innerHTML = '<span class="spinner"></span> Bezig...';
+    try {
+      const { orgId, apiKey } = await decryptCredentials(stored, pw);
+      hideOverlay(orgId, apiKey);
+    } catch {
+      showAuthError('Onjuist wachtwoord. Probeer opnieuw.');
+    }
+    btnLogin.disabled = false;
+    btnLogin.textContent = 'Inloggen';
+  });
+
+  document.getElementById('loginPassword').addEventListener('keydown', e => {
+    if (e.key === 'Enter') btnLogin.click();
+  });
+
+  // ── Setup handler ──────────────────────────────────────────────────────────
+
+  btnSetup.addEventListener('click', async () => {
+    clearAuthError();
+    const orgId = document.getElementById('setupOrgId').value.trim();
+    const apiKey = document.getElementById('setupApiKey').value.trim();
+    const pw1 = document.getElementById('setupPassword').value;
+    const pw2 = document.getElementById('setupPassword2').value;
+
+    if (!orgId || !apiKey) { showAuthError('Vul je Verenigings-ID en API-sleutel in.'); return; }
+    if (!/^[0-9a-f-]{36}$/i.test(orgId)) { showAuthError('Ongeldig Verenigings-ID. Gebruik de UUID uit je Stamhoofd-instellingen.'); return; }
+    if (pw1.length < 8) { showAuthError('Kies een wachtwoord van minimaal 8 tekens.'); return; }
+    if (pw1 !== pw2) { showAuthError('Wachtwoorden komen niet overeen.'); return; }
+
+    btnSetup.disabled = true;
+    btnSetup.innerHTML = '<span class="spinner"></span> Opslaan...';
+    try {
+      const enc = await encryptCredentials(orgId, apiKey, pw1);
+      localStorage.setItem(LS_KEY, enc);
+      hideOverlay(orgId, apiKey);
+    } catch (err) {
+      showAuthError('Fout bij opslaan: ' + err.message);
+    }
+    btnSetup.disabled = false;
+    btnSetup.textContent = 'Opslaan & inloggen';
+  });
+
+  // ── Reset / lock buttons ───────────────────────────────────────────────────
+
+  linkReset.addEventListener('click', e => {
+    e.preventDefault();
+    if (confirm('Dit wist je opgeslagen inloggegevens. Je moet daarna opnieuw je API-sleutel en wachtwoord instellen. Doorgaan?')) {
+      localStorage.removeItem(LS_KEY);
+      showOverlay('login');
+    }
+  });
+
+  btnLock.addEventListener('click', lock);
+
+  // ── Change credentials handler ─────────────────────────────────────────────
+
+  // Open change view from header (while logged in)
+  btnChangeCreds.addEventListener('click', () => {
+    clearAutoLock();
+    showOverlay('change');
+  });
+
+  // Open change view from login screen (while locked)
+  linkChangeWhileLocked.addEventListener('click', e => {
+    e.preventDefault();
+    showOverlay('change');
+  });
+
+  // Cancel change — go back to login
+  document.getElementById('btnCancelChange').addEventListener('click', () => {
+    clearAuthError();
+    if (sessionApiKey) {
+      // User was logged in before opening change view
+      authOverlay.style.display = 'none';
+      startAutoLock();
+    } else {
+      showOverlay('login');
+    }
+  });
+
+  document.getElementById('btnChange').addEventListener('click', async () => {
+    clearAuthError();
+    const currentPw   = document.getElementById('changeCurrentPw').value;
+    const newOrgId    = document.getElementById('changeOrgId').value.trim();
+    const newApiKey   = document.getElementById('changeApiKey').value.trim();
+    const newPw       = document.getElementById('changeNewPw').value;
+    const newPw2      = document.getElementById('changeNewPw2').value;
+
+    if (!currentPw) { showAuthError('Voer je huidige wachtwoord in ter verificatie.'); return; }
+
+    // Validate optional new values
+    if (newOrgId && !/^[0-9a-f-]{36}$/i.test(newOrgId)) {
+      showAuthError('Ongeldig Verenigings-ID. Gebruik de UUID uit je Stamhoofd-instellingen.'); return;
+    }
+    if (newPw && newPw.length < 8) { showAuthError('Nieuw wachtwoord moet minimaal 8 tekens bevatten.'); return; }
+    if (newPw && newPw !== newPw2) { showAuthError('Nieuwe wachtwoorden komen niet overeen.'); return; }
+
+    const btn = document.getElementById('btnChange');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Bezig...';
+
+    try {
+      // Verify current password by decrypting existing credentials
+      const stored = localStorage.getItem(LS_KEY);
+      if (!stored) throw new Error('Geen opgeslagen gegevens gevonden.');
+      const existing = await decryptCredentials(stored, currentPw);
+
+      // Merge: use new values where provided, keep existing otherwise
+      const finalOrgId  = newOrgId  || existing.orgId;
+      const finalApiKey = newApiKey || existing.apiKey;
+      const finalPw     = newPw     || currentPw;
+
+      const enc = await encryptCredentials(finalOrgId, finalApiKey, finalPw);
+      localStorage.setItem(LS_KEY, enc);
+
+      // Update live session
+      hideOverlay(finalOrgId, finalApiKey);
+    } catch (err) {
+      if (err.message.includes('opgeslagen')) {
+        showAuthError(err.message);
+      } else {
+        showAuthError('Verificatie mislukt. Controleer je huidige wachtwoord.');
+      }
+    }
+
+    btn.disabled = false;
+    btn.textContent = 'Opslaan';
+  });
+
+  // ── Boot: show overlay ─────────────────────────────────────────────────────
+  showOverlay('login');
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // MAIN APP
+  // ══════════════════════════════════════════════════════════════════════════
+
   // ── State ──────────────────────────────────────────────────────────────────
   let csvRows = [];
   let openPayments = [];
@@ -444,8 +939,6 @@
   function checkReady() {
     btnFetch.disabled = !(orgIdEl.value.trim() && apiKeyEl.value.trim() && csvRows.length > 0);
   }
-  orgIdEl.addEventListener('input', checkReady);
-  apiKeyEl.addEventListener('input', checkReady);
 
   // ── File handling ──────────────────────────────────────────────────────────
   fileInput.addEventListener('change', e => handleFile(e.target.files[0]));
